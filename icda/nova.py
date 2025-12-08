@@ -7,7 +7,7 @@ from .database import CustomerDB
 class NovaClient:
     __slots__ = ("client", "model", "available", "db")
 
-    _PROMPT = "You are ICDA, an AI assistant for customer data queries. Be concise. Never provide SSN, financial, or health info."
+    _PROMPT = "You are ICDA, an AI assistant for customer data queries. Be concise. Never provide SSN, financial, or health info. You have access to conversation history - use it to maintain context."
 
     TOOLS = [
         {"toolSpec": {"name": "lookup_crid", "description": "Look up customer by CRID",
@@ -36,23 +36,49 @@ class NovaClient:
             messages=messages,
             system=[{"text": self._PROMPT}],
             toolConfig={"tools": self.TOOLS, "toolChoice": {"auto": {}}},
-            inferenceConfig={"maxTokens": 1024, "temperature": 0.1}
+            inferenceConfig={"maxTokens": 4096, "temperature": 0.1}
         )
 
-    async def query(self, text: str) -> dict:
+    async def query(self, text: str, history: list[dict] | None = None) -> dict:
+        """
+        Query Nova with optional conversation history.
+
+        Args:
+            text: The user's query
+            history: Previous messages in Bedrock format [{"role": "user/assistant", "content": [{"text": "..."}]}]
+                     IMPORTANT: History must only contain text content, not toolUse blocks!
+
+        Returns:
+            dict with success, response, and optional tool used
+        """
         if not self.available:
             return {"success": False, "error": "Nova not available"}
+
         try:
-            resp = self._converse([{"role": "user", "content": [{"text": text}]}])
+            # Build messages: history + current query
+            # Filter history to ensure only text content (no toolUse blocks that would require toolResult)
+            messages = []
+            if history:
+                for msg in history:
+                    # Only include messages with pure text content
+                    clean_content = [b for b in msg.get("content", []) if "text" in b]
+                    if clean_content:
+                        messages.append({"role": msg["role"], "content": clean_content})
+            messages.append({"role": "user", "content": [{"text": text}]})
+
+            resp = self._converse(messages)
             content = resp["output"]["message"]["content"]
 
             if tool := next((b["toolUse"] for b in content if "toolUse" in b), None):
                 result = self._execute_tool(tool["name"], tool["input"])
-                follow = self._converse([
-                    {"role": "user", "content": [{"text": text}]},
+
+                # Continue with tool result (this is a self-contained exchange, not stored in history)
+                follow_messages = messages + [
                     {"role": "assistant", "content": content},
                     {"role": "user", "content": [{"toolResult": {"toolUseId": tool["toolUseId"], "content": [{"json": result}]}}]}
-                ])
+                ]
+                follow = self._converse(follow_messages)
+
                 if out := next((b["text"] for b in follow["output"]["message"]["content"] if "text" in b), None):
                     return {"success": True, "response": out, "tool": tool["name"]}
 
@@ -71,7 +97,7 @@ class NovaClient:
                 return self.db.lookup(params.get("crid", ""))
             case "search_customers":
                 return self.db.search(
-                    state=params.get("state"), city=params.get("city"),
+                    state=params.get("state"), city=params.get("city"), name=params.get("name"),
                     min_moves=params.get("min_move_count"), limit=params.get("limit", 10)
                 )
             case "get_stats":

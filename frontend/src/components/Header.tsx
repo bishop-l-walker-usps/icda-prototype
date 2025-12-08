@@ -75,8 +75,8 @@ export const Header: React.FC<HeaderProps> = ({
 
         <Tooltip title="Start New Conversation">
           <IconButton onClick={onNewSession} size="small" sx={{ color: colors.primary.light, '&:hover': { backgroundColor: `${colors.primary.main}22` } }}>
-            <NewChatIcon />
-          </IconButton>
+          </IconButton>            <NewChatIcon />
+
         </Tooltip>
 
         <StatusChip

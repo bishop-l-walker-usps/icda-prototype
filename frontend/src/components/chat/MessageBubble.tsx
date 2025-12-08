@@ -26,6 +26,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
     ...(message.type === 'bot' && styles.chat.message.bot),
     ...(isBlocked && styles.chat.message.blocked),
     ...(isError && styles.chat.message.error),
+    // Ensure proper width constraints for text wrapping
+    width: 'fit-content',
+    maxWidth: '85%',
+    minWidth: 0,
+    overflow: 'auto',
+      height: 'auto' ,
   };
 
   return (
@@ -43,7 +49,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
         </Box>
       )}
 
-      <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+      <Typography 
+        variant="body2"
+        sx={{
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            overflowWrap: 'break-word',
+            width: '100%',
+            maxHeight: '400px',  // or whatever height limit
+            overflowY: 'auto',   // adds scrollbar when needed
+        }}
+
+      >
         {message.content}
       </Typography>
 
