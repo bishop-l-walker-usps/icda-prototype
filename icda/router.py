@@ -5,34 +5,45 @@ from .cache import RedisCache
 from .database import CustomerDB
 from .guardrails import Guardrails, GuardrailFlags
 from .nova import NovaClient
+from .session import Session, SessionManager
 from .vector_index import VectorIndex, RouteType
 
 
 class Router:
-    """Routes queries: Guardrails → Cache → Vector Route → DB/Nova"""
-    __slots__ = ("cache", "vector_index", "db", "nova")
+    """Routes queries: Guardrails → Cache → Vector Route → DB/Nova with session context"""
+    __slots__ = ("cache", "vector_index", "db", "nova", "sessions")
 
-    def __init__(self, cache: RedisCache, vector_index: VectorIndex, db: CustomerDB, nova: NovaClient):
+    def __init__(self, cache: RedisCache, vector_index: VectorIndex, db: CustomerDB, nova: NovaClient, sessions: SessionManager):
         self.cache = cache
         self.vector_index = vector_index
         self.db = db
         self.nova = nova
+        self.sessions = sessions
 
-    async def route(self, query: str, bypass_cache: bool = False, guardrails: dict | None = None) -> dict:
+    async def route(
+        self,
+        query: str,
+        bypass_cache: bool = False,
+        guardrails: dict | None = None,
+        session_id: str | None = None
+    ) -> dict:
         start = time()
         q = query.strip()
+
+        # Get or create session
+        session = await self.sessions.get(session_id)
 
         # 1. Guardrails
         flags = GuardrailFlags(**guardrails) if guardrails else None
         if blocked := Guardrails.check(q, flags):
-            return self._response(q, blocked, RouteType.CACHE_HIT, start, blocked=True)
+            return self._response(q, blocked, RouteType.CACHE_HIT, start, blocked=True, session_id=session.session_id)
 
-        # 2. Cache check
+        # 2. Cache check (skip for conversational context - cache is for isolated queries)
         key = RedisCache.make_key(q)
-        if not bypass_cache:
+        if not bypass_cache and not session.messages:
             if hit := await self.cache.get(key):
                 data = json.loads(hit)
-                return self._response(q, data["response"], RouteType.CACHE_HIT, start, cached=True)
+                return self._response(q, data["response"], RouteType.CACHE_HIT, start, cached=True, session_id=session.session_id)
 
         # 3. Vector routing
         route_type, metadata = await self.vector_index.find_route(q)
@@ -43,17 +54,32 @@ class Router:
             result = self.db.execute(tool, q)
             if result["success"]:
                 response = self._format_db_result(result, tool)
-                await self.cache.set(key, json.dumps({"response": response}))
-                return self._response(q, response, RouteType.DATABASE, start, tool=tool)
+                # Store in session
+                session.add_message("user", q)
+                session.add_message("assistant", response)
+                await self.sessions.save(session)
+                # Cache only if no prior context
+                if len(session.messages) <= 2:
+                    await self.cache.set(key, json.dumps({"response": response}))
+                return self._response(q, response, RouteType.DATABASE, start, tool=tool, session_id=session.session_id)
             route_type = RouteType.NOVA
 
-        # 5. Nova for complex queries
-        result = await self.nova.query(q)
+        # 5. Nova for complex queries - pass conversation history
+        history = session.get_history(max_messages=20) if session.messages else None
+        result = await self.nova.query(q, history=history)
+        
         if result["success"]:
-            await self.cache.set(key, json.dumps({"response": result["response"]}))
-            return self._response(q, result["response"], RouteType.NOVA, start, tool=result.get("tool"))
+            response = result["response"]
+            # Update session
+            session.add_message("user", q)
+            session.add_message("assistant", response)
+            await self.sessions.save(session)
+            # Cache only standalone queries
+            if len(session.messages) <= 2:
+                await self.cache.set(key, json.dumps({"response": response}))
+            return self._response(q, response, RouteType.NOVA, start, tool=result.get("tool"), session_id=session.session_id)
 
-        return self._response(q, result.get("error", "Unknown error"), RouteType.NOVA, start, success=False)
+        return self._response(q, result.get("error", "Unknown error"), RouteType.NOVA, start, success=False, session_id=session.session_id)
 
     def _format_db_result(self, result: dict, tool: str) -> str:
         match tool:
@@ -85,5 +111,6 @@ class Router:
             "cached": kwargs.get("cached", False),
             "blocked": kwargs.get("blocked", False),
             "tool": kwargs.get("tool"),
-            "latency_ms": int((time() - start) * 1000)
+            "latency_ms": int((time() - start) * 1000),
+            "session_id": kwargs.get("session_id"),
         }

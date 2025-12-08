@@ -32,13 +32,23 @@ class CustomerDB:
                     return {"success": True, "data": data}
         return {"success": False, "error": f"CRID {crid} not found"}
 
-    def search(self, state: str = None, city: str = None, min_moves: int = None, limit: int = None) -> dict:
+    def search(self, state: str = None, city: str = None, name: str = None, address: str = None, min_moves: int = None, limit: int = None) -> dict:
         results = self.by_state.get(state.upper(), []) if state else self.customers
         if min_moves:
             results = [c for c in results if c["move_count"] >= min_moves]
+
         if city:
             city_lower = city.casefold()
             results = [c for c in results if city_lower in c["city"].casefold()]
+            results.sort(key=lambda c: c["city"].casefold().index(city_lower))
+        if name:
+            name_lower = name.casefold()
+            results = [c for c in results if name_lower in c["name"].casefold()]
+            results.sort(key=lambda c: c["name"].casefold().index(name_lower))
+        if address:
+            address_lower = address.casefold()
+            results = [c for c in results if address_lower in c["address"].casefold()]
+            results.sort(key=lambda c: c["address"].casefold().index(address_lower))
         data = results[:limit] if limit else results
         return {"success": True, "total": len(results), "data": data}
 

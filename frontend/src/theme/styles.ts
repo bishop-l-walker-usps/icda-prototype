@@ -16,7 +16,8 @@ export const styles = {
       flexGrow: 1,
       display: 'flex',
       flexDirection: 'column',
-      overflow: 'hidden',
+      overflow: 'hidden',  // Let children handle scroll
+      minHeight: 0,        // Critical for flex scroll
     } as SxProps<Theme>,
 
     sidebar: {
@@ -170,9 +171,15 @@ export const styles = {
 
     message: {
       base: {
-        maxWidth: '80%',
+        maxWidth: '95%',
         p: 2,
         borderRadius: borderRadius.lg,
+        minHeight: 'auto',
+        overflowY: 'auto',
+        transition: transitions.fast,
+        '&:hover': {
+          backgroundColor: 'background.elevated',
+        },
       } as SxProps<Theme>,
 
       user: {

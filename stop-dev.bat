@@ -1,40 +1,43 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
-echo ============================================
-echo Stopping EBL Development Environment
-echo ============================================
+echo ============================================================
+echo    ICDA Prototype - Stop All Development Servers
+echo ============================================================
 echo.
 
-rem Target ports for dev services and similar alternates
-rem - Vite: 5173 and nearby when auto-incrementing
-rem - Vite preview: 4173
-rem - Backend (Uvicorn): 8000 and nearby when auto-incrementing
-rem - Common frontend alts: 3000,3001
- for %%P in (5173 5174 5175 5176 8000 8001 8002 8003 8004 8005 8006 8007 8008 8009 8010) do (
-     echo Checking port %%P...
-     for /f "tokens=5" %%a in ('netstat -ano ^| findstr :%%P') do (
-         echo Found process %%a on port %%P - killing...
-         taskkill /F /PID %%a 2>nul
-     )
- )
-
-  rem IPv6 LISTENING (exact port match: "]:PORT ")
-  for /f "tokens=5" %%A in ('netstat -ano -p tcp ^| findstr /R /C:"]:%%P " ^| findstr LISTENING') do (
-    echo Killing PID %%A (IPv6)
-    taskkill /F /T /PID %%A >nul 2>&1
-  )
+REM Kill processes on backend port 8000
+echo [INFO] Checking port 8000 (FastAPI Backend)...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000 ^| findstr LISTENING') do (
+    echo        Killing PID %%a...
+    taskkill /F /PID %%a >nul 2>&1
 )
+
+REM Kill processes on Vite port 5173
+echo [INFO] Checking port 5173 (Vite Frontend)...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5173 ^| findstr LISTENING') do (
+    echo        Killing PID %%a...
+    taskkill /F /PID %%a >nul 2>&1
+)
+
+REM Kill processes on Vite preview port 4173
+echo [INFO] Checking port 4173 (Vite Preview)...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :4173 ^| findstr LISTENING') do (
+    echo        Killing PID %%a...
+    taskkill /F /PID %%a >nul 2>&1
+)
+
+REM Kill any stray node processes related to vite
+echo [INFO] Checking for stray Node.js processes...
+taskkill /F /IM "node.exe" /FI "WINDOWTITLE eq ICDA Frontend" >nul 2>&1
+
+REM Kill any stray python/uvicorn processes
+echo [INFO] Checking for stray Python processes...
+taskkill /F /IM "python.exe" /FI "WINDOWTITLE eq ICDA Backend" >nul 2>&1
+
 echo.
-echo ============================================
-echo All dev server stop attempts completed.
-echo ============================================
+echo ============================================================
+echo [SUCCESS] All ICDA dev servers stopped!
+echo ============================================================
 echo.
-echo Ports checked: %PORTS%
+echo Ports cleared: 8000, 5173, 4173
 echo.
-echo If servers are still running, try:
-echo   1. Run this script as Administrator
-echo   2. Check Task Manager for node/python processes
-echo   3. Use: netstat -ano ^| findstr :5173
-echo.
-endlocal
 pause
