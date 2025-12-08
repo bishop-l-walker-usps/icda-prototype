@@ -211,8 +211,12 @@
 
         fetch('/api/health').then(r => r.json()).then(d => {
             const s = document.getElementById('status');
-            s.textContent = d.nova ? 'Nova Connected' : 'Nova Unavailable';
-            s.className = 'badge' + (d.nova ? ' active' : '');
+            const allGood = d.redis && d.opensearch && d.embedder && d.nova;
+            s.textContent = allGood ? `All Systems Go (${d.customers.toLocaleString()} customers)` :
+                `Redis:${d.redis ? '✓' : '✗'} OS:${d.opensearch ? '✓' : '✗'} Nova:${d.nova ? '✓' : '✗'}`;
+            s.className = 'badge' + (allGood ? ' active' : '');
+        }).catch(e => {
+            document.getElementById('status').textContent = 'API Offline';
         });
 
         q.addEventListener('keypress', e => { if (e.key === 'Enter') send(); });

@@ -69,18 +69,31 @@ class NovaClient:
             resp = self._converse(messages)
             content = resp["output"]["message"]["content"]
 
-            if tool := next((b["toolUse"] for b in content if "toolUse" in b), None):
-                result = self._execute_tool(tool["name"], tool["input"])
+            # Handle ALL tool calls in the response
+            tools = [b["toolUse"] for b in content if "toolUse" in b]
+            if tools:
+                # Execute all tools and collect results
+                tool_results = []
+                tool_names = []
+                for tool in tools:
+                    result = self._execute_tool(tool["name"], tool["input"])
+                    tool_results.append({
+                        "toolResult": {
+                            "toolUseId": tool["toolUseId"],
+                            "content": [{"json": result}]
+                        }
+                    })
+                    tool_names.append(tool["name"])
 
-                # Continue with tool result (this is a self-contained exchange, not stored in history)
+                # Continue with ALL tool results
                 follow_messages = messages + [
                     {"role": "assistant", "content": content},
-                    {"role": "user", "content": [{"toolResult": {"toolUseId": tool["toolUseId"], "content": [{"json": result}]}}]}
+                    {"role": "user", "content": tool_results}
                 ]
                 follow = self._converse(follow_messages)
 
                 if out := next((b["text"] for b in follow["output"]["message"]["content"] if "text" in b), None):
-                    return {"success": True, "response": out, "tool": tool["name"]}
+                    return {"success": True, "response": out, "tool": ", ".join(tool_names)}
 
             if out := next((b["text"] for b in content if "text" in b), None):
                 return {"success": True, "response": out}
@@ -97,8 +110,8 @@ class NovaClient:
                 return self.db.lookup(params.get("crid", ""))
             case "search_customers":
                 return self.db.search(
-                    state=params.get("state"), city=params.get("city"), name=params.get("name"),
-                    min_moves=params.get("min_move_count"), limit=params.get("limit", 10)
+                    state=params.get("state"), city=params.get("city"),
+                    min_moves=params.get("min_move_count"), limit=params.get("limit")
                 )
             case "get_stats":
                 return self.db.stats()

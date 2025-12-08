@@ -32,7 +32,7 @@ export const AWSToolingPanel: React.FC<AWSToolingPanelProps> = ({ health, loadin
     <Typography variant="h6" sx={{ mb: 2, color: colors.aws.orange }}>AWS Tooling</Typography>
     <Stack spacing={1.5}>
       {SERVICES.map(({ name, desc, icon, key }) => {
-        const status: Status = loading ? 'loading' : !health ? 'loading' : health[key] ? 'online' : 'offline';
+        const status: Status = loading ? 'loading' : !health ? 'offline' : health[key] ? 'online' : 'offline';
         return (
           <Card key={name} sx={{ backgroundColor: 'background.elevated', border: 1, borderColor: getStatusBgColor(status, '44') }}>
             <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>

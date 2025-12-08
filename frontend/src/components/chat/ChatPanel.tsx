@@ -1,56 +1,136 @@
 import React, { useRef, useEffect } from 'react';
 import { Box, Typography, CircularProgress } from '@mui/material';
-import { styles } from '../../theme/styles';
+import { alpha } from '@mui/material/styles';
+import { colors, borderRadius } from '../../theme';
 import { MessageBubble } from './MessageBubble';
+import { WelcomePanel } from '../WelcomePanel';
+import { QuickActions } from '../QuickActions';
 import type { ChatMessage } from '../../types';
 
 interface ChatPanelProps {
   messages: ChatMessage[];
   loading: boolean;
+  onQuickAction?: (query: string) => void;
 }
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, loading }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, loading, onQuickAction }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const hasMessages = messages.length > 0;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
+  const handleQuickAction = (query: string) => {
+    onQuickAction?.(query);
+  };
+
   return (
-    <Box 
-      sx={{ 
-        display: 'flex', 
-        flexDirection: 'column', 
-        flex: 1,           // Take available space
-        minHeight: 0,      // Critical for flex scroll
-        overflow: 'hidden' // Contain the scroll area
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: 0,
+        overflow: 'hidden',
+        background: `linear-gradient(180deg, ${colors.background.default} 0%, ${colors.background.paper} 100%)`,
       }}
     >
       <Box
         ref={scrollRef}
-        sx={{ 
-          ...styles.chat.container, 
+        sx={{
           flex: 1,
-          minHeight: 0,        // Critical for flex scroll
-          overflowY: 'auto',   // Enable vertical scroll
-          overflowX: 'hidden', // No horizontal scroll
+          minHeight: 0,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          p: hasMessages ? 2 : 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
         }}
       >
-        {messages.length === 0 ? (
-          <Box sx={{ ...styles.utils.flexCenter, flexGrow: 1, flexDirection: 'column', gap: 2, opacity: 0.5 }}>
-            <Typography variant="h6">ICDA Query Interface</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Ask questions about customer data. Try "Show me John Smith's account" or "List customers in Texas".
-            </Typography>
+        {!hasMessages ? (
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flex: 1,
+              minHeight: 0,
+            }}
+          >
+            {/* Welcome Panel with AI Greeting */}
+            <WelcomePanel visible={!hasMessages} />
+
+            {/* Quick Action Buttons */}
+            <QuickActions
+              visible={!hasMessages}
+              onSelectAction={handleQuickAction}
+            />
           </Box>
         ) : (
-          messages.map((msg) => <MessageBubble key={msg.id} message={msg} />)
+          <>
+            {/* Conversation Header */}
+            <Box
+              sx={{
+                display: 'flex',
+                justifyContent: 'center',
+                mb: 2,
+              }}
+            >
+              <Box
+                sx={{
+                  px: 3,
+                  py: 1,
+                  borderRadius: borderRadius.xl,
+                  backgroundColor: alpha(colors.accent.main, 0.1),
+                  border: `1px solid ${alpha(colors.accent.main, 0.2)}`,
+                }}
+              >
+                <Typography
+                  variant="caption"
+                  sx={{
+                    color: colors.accent.light,
+                    fontWeight: 500,
+                    letterSpacing: 0.5,
+                  }}
+                >
+                  ICDA Conversation
+                </Typography>
+              </Box>
+            </Box>
+
+            {/* Messages */}
+            {messages.map((msg) => (
+              <MessageBubble key={msg.id} message={msg} />
+            ))}
+          </>
         )}
 
+        {/* Loading Indicator */}
         {loading && (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, alignSelf: 'flex-start', p: 2 }}>
-            <CircularProgress size={20} />
-            <Typography variant="body2" color="text.secondary">Processing query...</Typography>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+              alignSelf: 'flex-start',
+              p: 2,
+              borderRadius: borderRadius.lg,
+              backgroundColor: alpha(colors.accent.main, 0.1),
+              border: `1px solid ${alpha(colors.accent.main, 0.2)}`,
+              animation: 'fadeIn 0.3s ease-out',
+              '@keyframes fadeIn': {
+                from: { opacity: 0, transform: 'translateY(10px)' },
+                to: { opacity: 1, transform: 'translateY(0)' },
+              },
+            }}
+          >
+            <CircularProgress size={20} sx={{ color: colors.accent.main }} />
+            <Typography variant="body2" sx={{ color: colors.accent.light }}>
+              ICDA is thinking...
+            </Typography>
           </Box>
         )}
       </Box>

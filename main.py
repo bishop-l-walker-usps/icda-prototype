@@ -9,8 +9,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()  # Must be before importing config
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from icda.config import Config
@@ -20,6 +21,7 @@ from icda.vector_index import VectorIndex
 from icda.database import CustomerDB
 from icda.nova import NovaClient
 from icda.router import Router
+from icda.session import SessionManager
 
 cfg = Config()  # Fresh instance after dotenv loaded
 
@@ -31,12 +33,13 @@ _embedder: EmbeddingClient = None
 _vector_index: VectorIndex = None
 _db: CustomerDB = None
 _nova: NovaClient = None
+_sessions: SessionManager = None
 _router: Router = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _cache, _embedder, _vector_index, _db, _nova, _router
+    global _cache, _embedder, _vector_index, _db, _nova, _sessions, _router
 
     # Startup
     _cache = RedisCache(cfg.cache_ttl)
@@ -51,7 +54,9 @@ async def lifespan(app: FastAPI):
 
     _nova = NovaClient(cfg.aws_region, cfg.nova_model, _db)
 
-    _router = Router(_cache, _vector_index, _db, _nova)
+    _sessions = SessionManager(_cache)
+
+    _router = Router(_cache, _vector_index, _db, _nova, _sessions)
 
     yield
 
@@ -61,6 +66,24 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ICDA", version="0.5.0", lifespan=lifespan)
+
+# CORS - allow all origins for development
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    return JSONResponse(
+        status_code=500,
+        content={"error": str(exc)},
+        headers={"Access-Control-Allow-Origin": "*"}
+    )
 
 
 class GuardrailSettings(BaseModel):

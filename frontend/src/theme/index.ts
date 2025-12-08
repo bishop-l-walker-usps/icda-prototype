@@ -1,68 +1,94 @@
 import { createTheme, alpha } from '@mui/material/styles';
 
-// Centralized color palette
+// USPS-Inspired Color Palette with high contrast
 export const colors = {
   primary: {
-    main: '#1976d2',
-    light: '#42a5f5',
-    dark: '#1565c0',
+    main: '#004B87',     // USPS Blue
+    light: '#0077C8',    // Brighter blue for accents
+    dark: '#003366',     // Darker blue
     contrastText: '#fff',
   },
   secondary: {
-    main: '#9c27b0',
-    light: '#ba68c8',
-    dark: '#7b1fa2',
+    main: '#DA291C',     // USPS Red
+    light: '#FF5252',    // Brighter red
+    dark: '#B71C1C',     // Darker red
     contrastText: '#fff',
   },
+  accent: {
+    main: '#00BFA5',     // Teal for AI responses
+    light: '#64FFDA',    // Light teal
+    dark: '#00897B',     // Dark teal
+  },
   success: {
-    main: '#2e7d32',
-    light: '#4caf50',
-    dark: '#1b5e20',
+    main: '#2E7D32',
+    light: '#4CAF50',
+    dark: '#1B5E20',
   },
   error: {
-    main: '#d32f2f',
-    light: '#ef5350',
-    dark: '#c62828',
+    main: '#D32F2F',
+    light: '#EF5350',
+    dark: '#C62828',
   },
   warning: {
-    main: '#ed6c02',
-    light: '#ff9800',
-    dark: '#e65100',
+    main: '#ED6C02',
+    light: '#FF9800',
+    dark: '#E65100',
   },
   info: {
-    main: '#0288d1',
-    light: '#03a9f4',
-    dark: '#01579b',
+    main: '#0288D1',
+    light: '#03A9F4',
+    dark: '#01579B',
   },
   background: {
-    default: '#0a1929',
-    paper: '#0d2137',
-    elevated: '#132f4c',
+    default: '#0D1B2A',    // Deep navy
+    paper: '#1B2838',      // Slightly lighter navy
+    elevated: '#243447',   // Card/panel backgrounds
+    chat: '#0F2027',       // Chat area background
   },
   text: {
-    primary: '#fff',
-    secondary: 'rgba(255, 255, 255, 0.7)',
+    primary: '#FFFFFF',
+    secondary: 'rgba(255, 255, 255, 0.75)',
     disabled: 'rgba(255, 255, 255, 0.5)',
+    muted: 'rgba(255, 255, 255, 0.6)',
   },
+  // USPS Brand Colors
+  usps: {
+    blue: '#004B87',
+    red: '#DA291C',
+    navy: '#1E3A5F',
+    lightBlue: '#A1C4E9',
+  },
+  // AWS-themed indicators
   aws: {
-    orange: '#ff9900',
-    blue: '#232f3e',
+    orange: '#FF9900',
+    blue: '#232F3E',
   },
+  // Guardrail colors (high contrast)
   guardrails: {
-    pii: '#f44336',
-    financial: '#ff9800',
-    credentials: '#9c27b0',
-    offtopic: '#607d8b',
+    pii: '#FF5252',
+    financial: '#FFB300',
+    credentials: '#AB47BC',
+    offtopic: '#78909C',
   },
+  // Route indicators
   routes: {
-    cache: '#4caf50',
-    database: '#2196f3',
-    nova: '#9c27b0',
+    cache: '#4CAF50',
+    database: '#2196F3',
+    nova: '#9C27B0',
+  },
+  // Quick action colors
+  quickActions: {
+    lookup: '#00BFA5',
+    search: '#0077C8',
+    stats: '#7C4DFF',
+    address: '#FF6D00',
+    list: '#00E676',
+    help: '#FF4081',
   },
   neutral: {
-    main: '#607d8b',
-    light: '#90a4ae',
-    dark: '#455a64',
+    main: '#607D8B',
+    light: '#90A4AE',
+    dark: '#455A64',
   },
 };
 
@@ -82,15 +108,17 @@ export const borderRadius = {
   md: 8,
   lg: 12,
   xl: 16,
+  xxl: 24,
   round: '50%',
 };
 
 // Centralized shadows
 export const shadows = {
-  sm: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)',
-  md: '0 3px 6px rgba(0,0,0,0.15), 0 2px 4px rgba(0,0,0,0.12)',
-  lg: '0 10px 20px rgba(0,0,0,0.15), 0 3px 6px rgba(0,0,0,0.10)',
-  xl: '0 15px 25px rgba(0,0,0,0.15), 0 5px 10px rgba(0,0,0,0.05)',
+  sm: '0 1px 3px rgba(0,0,0,0.20), 0 1px 2px rgba(0,0,0,0.28)',
+  md: '0 4px 8px rgba(0,0,0,0.25), 0 2px 4px rgba(0,0,0,0.20)',
+  lg: '0 12px 24px rgba(0,0,0,0.25), 0 4px 8px rgba(0,0,0,0.15)',
+  xl: '0 20px 40px rgba(0,0,0,0.30), 0 8px 16px rgba(0,0,0,0.15)',
+  glow: (color: string) => `0 0 20px ${alpha(color, 0.4)}`,
 };
 
 // Centralized transitions
@@ -98,6 +126,7 @@ export const transitions = {
   fast: '0.15s ease-in-out',
   normal: '0.3s ease-in-out',
   slow: '0.5s ease-in-out',
+  bounce: '0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55)',
 };
 
 // Pane sizes for expandable panels
@@ -106,7 +135,7 @@ export const paneSizes = {
     collapsed: 200,
     normal: 300,
     expanded: 600,
-    maxExpanded: 900, // 3x normal size
+    maxExpanded: 900,
   },
   sidebar: {
     collapsed: 60,
@@ -132,10 +161,12 @@ const theme = createTheme({
     h1: {
       fontSize: '2.5rem',
       fontWeight: 700,
+      letterSpacing: '-0.02em',
     },
     h2: {
       fontSize: '2rem',
       fontWeight: 600,
+      letterSpacing: '-0.01em',
     },
     h3: {
       fontSize: '1.5rem',
@@ -155,9 +186,11 @@ const theme = createTheme({
     },
     body1: {
       fontSize: '1rem',
+      lineHeight: 1.6,
     },
     body2: {
       fontSize: '0.875rem',
+      lineHeight: 1.5,
     },
     caption: {
       fontSize: '0.75rem',

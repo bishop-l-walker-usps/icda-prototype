@@ -5,6 +5,7 @@ import {
   ToggleButton,
   Tooltip,
   Stack,
+  Button,
 } from '@mui/material';
 import {
   Security as SecurityIcon,
@@ -20,6 +21,8 @@ import type { GuardrailFlags } from '../types';
 interface GuardrailsPanelProps {
   guardrails: GuardrailFlags;
   onToggle: (key: keyof GuardrailFlags) => void;
+  onDisableAll: () => void;
+  onEnableAll: () => void;
 }
 
 interface GuardrailConfig {
@@ -64,12 +67,39 @@ const guardrailConfigs: GuardrailConfig[] = [
 export const GuardrailsPanel: React.FC<GuardrailsPanelProps> = ({
   guardrails,
   onToggle,
+  onDisableAll,
+  onEnableAll,
 }) => {
+  const allDisabled = !guardrails.pii && !guardrails.financial && !guardrails.credentials && !guardrails.offtopic;
+  const allEnabled = guardrails.pii && guardrails.financial && guardrails.credentials && guardrails.offtopic;
   return (
     <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
         <SecurityIcon sx={{ color: colors.error.main }} />
         <Typography variant="h6">Guardrails</Typography>
+      </Box>
+
+      <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+        <Button
+          size="small"
+          variant={allDisabled ? "contained" : "outlined"}
+          color="error"
+          onClick={onDisableAll}
+          disabled={allDisabled}
+          sx={{ flex: 1, textTransform: 'none' }}
+        >
+          Disable All
+        </Button>
+        <Button
+          size="small"
+          variant={allEnabled ? "contained" : "outlined"}
+          color="success"
+          onClick={onEnableAll}
+          disabled={allEnabled}
+          sx={{ flex: 1, textTransform: 'none' }}
+        >
+          Enable All
+        </Button>
       </Box>
 
       <Stack spacing={1}>
