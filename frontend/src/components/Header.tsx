@@ -1,11 +1,12 @@
 import React, { useState, useCallback } from 'react';
 import { Box, Typography, Chip, IconButton, Tooltip } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   Refresh as RefreshIcon, Storage as StorageIcon, Cloud as CloudIcon,
   DeleteSweep as ClearCacheIcon, AddComment as NewChatIcon, Forum as SessionIcon,
+  Psychology as AIIcon, LocalPostOffice as MailIcon,
 } from '@mui/icons-material';
-import { styles } from '../theme/styles';
-import { colors } from '../theme';
+import { colors, borderRadius, transitions } from '../theme';
 import type { HealthStatus, CacheStats } from '../types';
 
 interface HeaderProps {
@@ -32,10 +33,13 @@ const StatusChip: React.FC<StatusChipProps> = ({ active, icon, activeLabel, inac
     label={active ? activeLabel : inactiveLabel}
     size="small"
     sx={{
-      backgroundColor: `${active ? activeColor : colors.neutral.main}22`,
+      backgroundColor: alpha(active ? activeColor : colors.neutral.main, 0.15),
       color: active ? activeColor : colors.neutral.light,
-      borderColor: active ? activeColor : colors.neutral.main,
-      border: 1,
+      border: `1px solid ${alpha(active ? activeColor : colors.neutral.main, 0.3)}`,
+      transition: transitions.fast,
+      '& .MuiChip-icon': {
+        color: active ? activeColor : colors.neutral.light,
+      },
     }}
   />
 );
@@ -54,63 +58,208 @@ export const Header: React.FC<HeaderProps> = ({
   const isNovaConnected = health?.nova ?? false;
 
   return (
-    <Box sx={styles.header.root}>
+    <Box
+      sx={{
+        py: 2,
+        px: 3,
+        borderBottom: `1px solid ${alpha(colors.primary.main, 0.2)}`,
+        backgroundColor: alpha(colors.background.paper, 0.8),
+        backdropFilter: 'blur(10px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 2,
+      }}
+    >
+      {/* Left side - Logo and title */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-        <Typography variant="h4" sx={styles.header.title}>USPS ICDA Prototype</Typography>
-        <Typography variant="body2" color="text.secondary">Intelligent Customer Data Access by ECS</Typography>
+        {/* ICDA Logo */}
+        <Box
+          sx={{
+            width: 44,
+            height: 44,
+            borderRadius: borderRadius.lg,
+            background: `linear-gradient(135deg, ${colors.usps.blue} 0%, ${colors.accent.main} 100%)`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: `0 4px 12px ${alpha(colors.accent.main, 0.3)}`,
+          }}
+        >
+          <AIIcon sx={{ fontSize: 26, color: '#fff' }} />
+        </Box>
+
+        <Box>
+          <Typography
+            variant="h5"
+            sx={{
+              fontWeight: 700,
+              background: `linear-gradient(135deg, ${colors.text.primary} 0%, ${colors.accent.light} 100%)`,
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+            }}
+          >
+            ICDA
+            <Chip
+              icon={<MailIcon sx={{ fontSize: 14 }} />}
+              label="USPS"
+              size="small"
+              sx={{
+                height: 22,
+                fontSize: '0.65rem',
+                backgroundColor: alpha(colors.usps.blue, 0.2),
+                color: colors.usps.lightBlue,
+                border: `1px solid ${alpha(colors.usps.blue, 0.4)}`,
+                '& .MuiChip-icon': {
+                  color: colors.usps.lightBlue,
+                },
+              }}
+            />
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+            Intelligent Customer Data Access • Powered by{' '}
+            <span style={{ color: '#FF0000', fontWeight: 900, textShadow: '0 0 2px rgba(255, 0, 0, 0.5)' }}>ECS</span>
+          </Typography>
+        </Box>
       </Box>
 
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+      {/* Right side - Status indicators and actions */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+        {/* Session Status */}
         <Tooltip title={sessionId ? `Session: ${sessionId.slice(0, 8)}...` : 'No active session'}>
           <span>
             <StatusChip
               active={!!sessionId}
-              icon={<SessionIcon />}
+              icon={<SessionIcon sx={{ fontSize: 16 }} />}
               activeLabel="Context Active"
               inactiveLabel="No Context"
-              activeColor={colors.primary.main}
+              activeColor={colors.accent.main}
             />
           </span>
         </Tooltip>
 
+        {/* New Chat Button */}
         <Tooltip title="Start New Conversation">
-          <IconButton onClick={onNewSession} size="small" sx={{ color: colors.primary.light, '&:hover': { backgroundColor: `${colors.primary.main}22` } }}>
-          </IconButton>            <NewChatIcon />
-
+          <IconButton
+            onClick={onNewSession}
+            size="small"
+            sx={{
+              color: colors.primary.light,
+              backgroundColor: alpha(colors.primary.main, 0.1),
+              transition: transitions.fast,
+              '&:hover': {
+                backgroundColor: alpha(colors.primary.main, 0.2),
+                transform: 'scale(1.05)',
+              },
+            }}
+          >
+            <NewChatIcon sx={{ fontSize: 20 }} />
+          </IconButton>
         </Tooltip>
 
+        {/* Nova Status */}
         <StatusChip
           active={isNovaConnected}
-          icon={<CloudIcon />}
-          activeLabel="Nova Connected"
-          inactiveLabel="Nova Unavailable"
-          activeColor={colors.success.main}
+          icon={<CloudIcon sx={{ fontSize: 16 }} />}
+          activeLabel="Nova Online"
+          inactiveLabel="Nova Offline"
+          activeColor={colors.success.light}
         />
 
+        {/* Cache Stats */}
         <Chip
-          icon={<StorageIcon />}
+          icon={<StorageIcon sx={{ fontSize: 16 }} />}
           label={`${cacheStats?.keys ?? 0} cached`}
           size="small"
-          sx={{ backgroundColor: `${colors.info.main}22`, color: colors.info.light, borderColor: colors.info.main, border: 1 }}
+          sx={{
+            backgroundColor: alpha(colors.info.main, 0.15),
+            color: colors.info.light,
+            border: `1px solid ${alpha(colors.info.main, 0.3)}`,
+            '& .MuiChip-icon': {
+              color: colors.info.light,
+            },
+          }}
         />
 
+        {/* Clear Cache Button */}
         <Tooltip title="Clear Redis Cache">
-          <IconButton
-            onClick={handleClearCache}
-            disabled={clearing || loading || (cacheStats?.keys ?? 0) === 0}
-            size="small"
-            sx={{ color: colors.error.light, '&:hover': { backgroundColor: `${colors.error.main}22` } }}
-          >
-            <ClearCacheIcon sx={{ animation: clearing ? 'spin 1s linear infinite' : 'none' }} />
-          </IconButton>
+          <span>
+            <IconButton
+              onClick={handleClearCache}
+              disabled={clearing || loading || (cacheStats?.keys ?? 0) === 0}
+              size="small"
+              sx={{
+                color: colors.error.light,
+                backgroundColor: alpha(colors.error.main, 0.1),
+                transition: transitions.fast,
+                '&:hover': {
+                  backgroundColor: alpha(colors.error.main, 0.2),
+                },
+                '&:disabled': {
+                  opacity: 0.4,
+                },
+                '@keyframes spin': {
+                  from: { transform: 'rotate(0deg)' },
+                  to: { transform: 'rotate(360deg)' },
+                },
+              }}
+            >
+              <ClearCacheIcon
+                sx={{
+                  fontSize: 20,
+                  animation: clearing ? 'spin 1s linear infinite' : 'none',
+                }}
+              />
+            </IconButton>
+          </span>
         </Tooltip>
 
-        {health && <Chip label={`${health.customers.toLocaleString()} customers`} size="small" variant="outlined" />}
+        {/* Customer Count */}
+        {health && (
+          <Chip
+            label={`${health.customers.toLocaleString()} customers`}
+            size="small"
+            variant="outlined"
+            sx={{
+              borderColor: alpha(colors.text.primary, 0.2),
+              color: 'text.secondary',
+            }}
+          />
+        )}
 
+        {/* Refresh Button */}
         <Tooltip title="Refresh status">
-          <IconButton onClick={onRefresh} disabled={loading} size="small" sx={{ color: 'text.secondary' }}>
-            <RefreshIcon sx={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-          </IconButton>
+          <span>
+            <IconButton
+              onClick={onRefresh}
+              disabled={loading}
+              size="small"
+              sx={{
+                color: 'text.secondary',
+                transition: transitions.fast,
+                '&:hover': {
+                  color: colors.accent.light,
+                  backgroundColor: alpha(colors.accent.main, 0.1),
+                },
+                '@keyframes spin': {
+                  from: { transform: 'rotate(0deg)' },
+                  to: { transform: 'rotate(360deg)' },
+                },
+              }}
+            >
+              <RefreshIcon
+                sx={{
+                  fontSize: 20,
+                  animation: loading ? 'spin 1s linear infinite' : 'none',
+                }}
+              />
+            </IconButton>
+          </span>
         </Tooltip>
       </Box>
     </Box>

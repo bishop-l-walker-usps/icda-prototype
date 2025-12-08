@@ -49,8 +49,11 @@ class RedisCache:
 
     async def stats(self) -> dict:
         if self.available:
-            info = await self.client.info("keyspace")
-            return {"keys": info.get("db0", {}).get("keys", 0), "backend": "redis", "ttl_hours": self.ttl // 3600}
+            try:
+                info = await self.client.info("keyspace")
+                return {"keys": info.get("db0", {}).get("keys", 0), "backend": "redis", "ttl_hours": self.ttl // 3600}
+            except Exception:
+                self.available = False  # Mark as unavailable on connection loss
         return {"keys": len(self._fallback), "backend": "memory", "ttl_hours": self.ttl // 3600}
 
     @staticmethod

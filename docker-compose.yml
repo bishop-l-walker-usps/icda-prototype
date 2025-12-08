@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  icda:
+    build: .
+    image: icda-prototype:latest
+    container_name: icda
+    ports:
+      - "8000:8000"
+    environment:
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      - NOVA_MODEL=${NOVA_MODEL:-us.amazon.nova-micro-v1:0}
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379}
+      - OPENSEARCH_HOST=${OPENSEARCH_HOST:-}
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: icda-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # Optional: Frontend dev server (uncomment for development)
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile.dev
+  #   ports:
+  #     - "5173:5173"
+  #   volumes:
+  #     - ./frontend/src:/app/src
+  #   environment:
+  #     - VITE_API_URL=http://localhost:8000
+
+volumes:
+  redis_data:

@@ -8,6 +8,8 @@ import type {
   AddressVerificationRequest,
   AddressVerificationResponse,
   FileQueryRequest,
+  AutocompleteResult,
+  SemanticSearchResult,
 } from '../types';
 
 // API base URL - configurable via environment variable
@@ -124,6 +126,78 @@ export const api = {
     );
     return response.data;
   },
+
+  // Autocomplete endpoints for smart address suggestions
+  autocomplete: async (
+    field: 'address' | 'name' | 'city',
+    query: string,
+    limit: number = 10,
+    fuzzy: boolean = false
+  ): Promise<AutocompleteResult> => {
+    const response = await apiClient.get<AutocompleteResult>(
+      `/api/autocomplete/${field}`,
+      {
+        params: { q: query, limit, fuzzy },
+        timeout: 5000, // Quick timeout for autocomplete
+      }
+    );
+    return response.data;
+  },
+
+  // Semantic search for natural language queries
+  semanticSearch: async (
+    query: string,
+    options: {
+      limit?: number;
+      state?: string;
+      city?: string;
+      minMoves?: number;
+      customerType?: 'BUSINESS' | 'INDIVIDUAL';
+    } = {}
+  ): Promise<SemanticSearchResult> => {
+    const { limit = 10, state, city, minMoves, customerType } = options;
+    const response = await apiClient.get<SemanticSearchResult>(
+      '/api/search/semantic',
+      {
+        params: {
+          q: query,
+          limit,
+          state,
+          city,
+          min_moves: minMoves,
+          customer_type: customerType,
+        },
+      }
+    );
+    return response.data;
+  },
+
+  // Street name suggestions for address completion
+  suggestStreet: async (
+    partial: string,
+    zipCode: string,
+    streetNumber?: string,
+    limit: number = 5
+  ): Promise<{ suggestions: StreetSuggestion[]; zip_code: string; partial: string }> => {
+    const response = await apiClient.post<{
+      suggestions: StreetSuggestion[];
+      zip_code: string;
+      partial: string;
+    }>('/api/address/suggest/street', {
+      partial,
+      zip_code: zipCode,
+      street_number: streetNumber,
+      limit,
+    });
+    return response.data;
+  },
 };
+
+// Additional type for street suggestions
+interface StreetSuggestion {
+  street_name: string;
+  street_type: string;
+  city: string;
+}
 
 export default api;

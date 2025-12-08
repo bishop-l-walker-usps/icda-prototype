@@ -108,3 +108,55 @@ export interface AWSServiceStatus {
   status: 'online' | 'offline' | 'loading';
   description: string;
 }
+
+// Autocomplete Types
+export interface AutocompleteItem {
+  value: string;
+  crid: string;
+  name: string;
+  city: string;
+  state: string;
+  score?: number;
+  count?: number;  // For city autocomplete
+}
+
+export interface AutocompleteResult {
+  success: boolean;
+  field: 'address' | 'name' | 'city';
+  count: number;
+  data: AutocompleteItem[];
+}
+
+// Semantic Search Types
+export interface CustomerSearchResult {
+  crid: string;
+  name: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  customer_type: 'BUSINESS' | 'INDIVIDUAL';
+  status: string;
+  move_count: number;
+  score: number;
+}
+
+export interface SemanticSearchResult {
+  success: boolean;
+  query: string;
+  count: number;
+  data: CustomerSearchResult[];
+}
+
+// Street Suggestion Types
+export interface StreetSuggestion {
+  street_name: string;
+  street_type: string;
+  city: string;
+}
+
+export interface StreetSuggestionResult {
+  suggestions: StreetSuggestion[];
+  zip_code: string;
+  partial: string;
+}

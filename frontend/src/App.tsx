@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Box, CssBaseline, ThemeProvider } from '@mui/material';
-import theme from './theme';
-import { styles } from './theme/styles';
+import { alpha } from '@mui/material/styles';
+import theme, { colors } from './theme';
 import type { GuardrailFlags } from './types';
 
 // Components
@@ -25,6 +25,7 @@ const DEFAULT_GUARDRAILS: GuardrailFlags = {
 function App() {
   const [guardrails, setGuardrails] = useState<GuardrailFlags>(DEFAULT_GUARDRAILS);
   const [bypassCache, setBypassCache] = useState(false);
+  const [pendingQuery, setPendingQuery] = useState<string | undefined>(undefined);
 
   // Custom hooks
   const { health, cacheStats, loading: healthLoading, refreshHealth, refreshCacheStats, clearCache } = useHealth();
@@ -37,30 +38,77 @@ function App() {
     }));
   };
 
+  const handleDisableAllGuardrails = () => {
+    setGuardrails({ pii: false, financial: false, credentials: false, offtopic: false });
+  };
+
+  const handleEnableAllGuardrails = () => {
+    setGuardrails({ pii: true, financial: true, credentials: true, offtopic: true });
+  };
+
   const handleRefresh = async () => {
     await Promise.all([refreshHealth(), refreshCacheStats()]);
   };
 
   const handleSendQuery = async (query: string, file?: File) => {
+    setPendingQuery(undefined);  // Clear pending query after sending
     await sendQuery(query, guardrails, bypassCache, file);
   };
 
   const handleNewSession = () => {
+    setPendingQuery(undefined);
     newSession();
   };
+
+  // Handler for quick action selections - sets pending query
+  const handleQuickAction = useCallback((query: string) => {
+    setPendingQuery(query);
+  }, []);
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <Box sx={styles.layout.root}>
+      <Box
+        sx={{
+          display: 'flex',
+          height: '100vh',
+          maxHeight: '100vh',
+          overflow: 'hidden',
+          backgroundColor: 'background.default',
+          background: `linear-gradient(135deg, ${colors.background.default} 0%, ${colors.background.paper} 50%, ${colors.background.default} 100%)`,
+        }}
+      >
         {/* Sidebar */}
-        <Box sx={styles.layout.sidebar}>
+        <Box
+          sx={{
+            width: 280,
+            flexShrink: 0,
+            borderRight: `1px solid ${alpha(colors.primary.main, 0.2)}`,
+            backgroundColor: alpha(colors.background.paper, 0.8),
+            backdropFilter: 'blur(10px)',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
           <AWSToolingPanel health={health} loading={healthLoading} />
-          <GuardrailsPanel guardrails={guardrails} onToggle={handleToggleGuardrail} />
+          <GuardrailsPanel
+            guardrails={guardrails}
+            onToggle={handleToggleGuardrail}
+            onDisableAll={handleDisableAllGuardrails}
+            onEnableAll={handleEnableAllGuardrails}
+          />
         </Box>
 
         {/* Main Content */}
-        <Box sx={styles.layout.mainContent}>
+        <Box
+          sx={{
+            flexGrow: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            minHeight: 0,
+          }}
+        >
           <Header
             health={health}
             cacheStats={cacheStats}
@@ -71,17 +119,22 @@ function App() {
             loading={healthLoading}
           />
 
-          {/* Chat Area */}
-          <ChatPanel messages={messages} loading={queryLoading} />
+          {/* Chat Area with Welcome Panel and Quick Actions */}
+          <ChatPanel
+            messages={messages}
+            loading={queryLoading}
+            onQuickAction={handleQuickAction}
+          />
 
-          {/* Query Input */}
+          {/* Query Input with address suggestions */}
           <QueryInput
             onSend={handleSendQuery}
-            onClear={newSession}
+            onClear={handleNewSession}
             loading={queryLoading}
             bypassCache={bypassCache}
             onBypassCacheChange={setBypassCache}
             messages={messages}
+            initialQuery={pendingQuery}
           />
         </Box>
       </Box>

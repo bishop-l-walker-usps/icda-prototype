@@ -2,3 +2,12 @@
 __pycache__/
 *.pyc
 .claude/
+node_modules/
+.idea/
+*.log
+.DS_Store
+venv/
+.venv/
+dist/
+build/
+*.egg-info/
