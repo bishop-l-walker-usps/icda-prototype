@@ -22,3 +22,5 @@ nul
 .claude/PROJECT_CONVENTIONS.json
 .claude/CONVENTIONS.md
 .claude/settings.local.json
+.env.docker
+.env.local
