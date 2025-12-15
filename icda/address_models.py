@@ -43,10 +43,7 @@ class AddressComponent(str, Enum):
     ZIP_CODE = "zip_code"
     ZIP_PLUS4 = "zip_plus4"
     COUNTRY = "country"
-<<<<<<< HEAD
-=======
     URBANIZATION = "urbanization"   # Puerto Rico only (URB field)
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 
 
 @dataclass(slots=True)
@@ -64,11 +61,8 @@ class ParsedAddress:
         zip_code: 5-digit ZIP code.
         zip_plus4: Optional 4-digit ZIP extension.
         country: Country code (default US).
-<<<<<<< HEAD
-=======
         urbanization: Puerto Rico urbanization name (URB field, required for PR).
         is_puerto_rico: True if this is a Puerto Rico address (ZIP 006-009).
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
         components_found: List of components successfully parsed.
         components_missing: List of components that couldn't be found.
     """
@@ -83,21 +77,13 @@ class ParsedAddress:
     zip_code: str | None = None
     zip_plus4: str | None = None
     country: str = "US"
-<<<<<<< HEAD
-=======
     urbanization: str | None = None
     is_puerto_rico: bool = False
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
     components_found: list[AddressComponent] = field(default_factory=list)
     components_missing: list[AddressComponent] = field(default_factory=list)
 
     @property
     def formatted(self) -> str:
-<<<<<<< HEAD
-        """Return formatted address string."""
-        parts = []
-
-=======
         """Return formatted address string.
 
         For Puerto Rico addresses, includes URB line before street address:
@@ -111,7 +97,6 @@ class ParsedAddress:
         if self.urbanization and self.is_puerto_rico:
             parts.append(f"URB {self.urbanization}")
 
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
         # Street line
         street_parts = []
         if self.street_number:
@@ -163,11 +148,8 @@ class ParsedAddress:
             "zip_code": self.zip_code,
             "zip_plus4": self.zip_plus4,
             "country": self.country,
-<<<<<<< HEAD
-=======
             "urbanization": self.urbanization,
             "is_puerto_rico": self.is_puerto_rico,
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
             "formatted": self.single_line,
         }
 

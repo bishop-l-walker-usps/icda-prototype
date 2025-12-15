@@ -38,10 +38,7 @@ class QualityGate(str, Enum):
     STATE_VALID = "state_valid"
     ZIP_VALID = "zip_valid"
     CONFIDENCE_THRESHOLD = "confidence_threshold"
-<<<<<<< HEAD
-=======
     PR_URBANIZATION = "pr_urbanization"  # Puerto Rico urbanization required
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 
 
 @dataclass(slots=True)
@@ -155,20 +152,12 @@ class ContextAgent:
         match = re.search(r'\b([A-Z]{2})\b', text)
         if match:
             state = match.group(1)
-<<<<<<< HEAD
-            # Validate it's a real state
-=======
             # Validate it's a real state (includes PR for Puerto Rico)
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
             valid_states = {
                 "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
                 "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
                 "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-<<<<<<< HEAD
-                "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-=======
                 "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "PR", "RI", "SC",
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
                 "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
                 "DC",
             }
@@ -422,21 +411,13 @@ class EnforcerAgent:
         if has_location:
             passed_count += 1
 
-<<<<<<< HEAD
-        # Gate 4: State valid
-=======
         # Gate 4: State valid (includes PR for Puerto Rico)
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
         if parsed.state:
             valid_states = {
                 "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
                 "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
                 "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
-<<<<<<< HEAD
-                "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
-=======
                 "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "PR", "RI", "SC",
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
                 "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
                 "DC",
             }
@@ -460,8 +441,6 @@ class EnforcerAgent:
             if zip_valid:
                 passed_count += 1
 
-<<<<<<< HEAD
-=======
         # Gate 6: Puerto Rico urbanization (only for PR addresses)
         if parsed.is_puerto_rico:
             has_urbanization = bool(parsed.urbanization)
@@ -479,7 +458,6 @@ class EnforcerAgent:
             if has_urbanization:
                 passed_count += 1
 
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
         # Calculate confidence based on gates passed
         total_gates = len(gates)
         confidence = passed_count / total_gates if total_gates > 0 else 0.0

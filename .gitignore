@@ -29,3 +29,6 @@ nul
 # OS
 .DS_Store
 Thumbs.db
+.claude/rag/chroma_db/
+.env.local
+.env.docker

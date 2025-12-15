@@ -29,10 +29,7 @@ from mcp.types import Tool, TextContent
 
 from knowledge_index import KnowledgeIndex
 from document_processor import DocumentProcessor
-<<<<<<< HEAD
-=======
 from enforcer import EnforcerOrchestrator, BatchKnowledgeItem
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 
 load_dotenv()
 
@@ -42,10 +39,7 @@ server = Server("knowledge-server")
 # Global instances (initialized on startup)
 knowledge_index: KnowledgeIndex | None = None
 doc_processor: DocumentProcessor | None = None
-<<<<<<< HEAD
-=======
 enforcer_orchestrator: EnforcerOrchestrator | None = None
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 
 # Configuration from environment
 WATCH_FOLDER = os.getenv("KNOWLEDGE_WATCH_FOLDER", "./knowledge_docs")
@@ -69,8 +63,6 @@ def get_processor() -> DocumentProcessor:
     return doc_processor
 
 
-<<<<<<< HEAD
-=======
 async def get_enforcer() -> EnforcerOrchestrator:
     """Lazy initialization of enforcer orchestrator."""
     global enforcer_orchestrator
@@ -83,7 +75,6 @@ async def get_enforcer() -> EnforcerOrchestrator:
     return enforcer_orchestrator
 
 
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 # ============== MCP Tools ==============
 
 @server.list_tools()
@@ -237,13 +228,8 @@ Example: delete_document(document_id="abc123")
         ),
         Tool(
             name="reindex_all",
-<<<<<<< HEAD
-            description="""Re-process and reindex all documents. 
-            
-=======
             description="""Re-process and reindex all documents.
 
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 Useful after upgrading embedding models or changing chunk settings.
 WARNING: This will delete and recreate the entire index.
 """,
@@ -257,8 +243,6 @@ WARNING: This will delete and recreate the entire index.
                 },
                 "required": ["confirm"]
             }
-<<<<<<< HEAD
-=======
         ),
         # ============== 5-Agent Enforcer Tools ==============
         Tool(
@@ -364,7 +348,6 @@ Example: search_pr_knowledge(query="urbanization requirements", limit=10)
                 },
                 "required": ["query"]
             }
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
         )
     ]
 
@@ -408,8 +391,6 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 result = {"error": "Must set confirm=true to reindex"}
             else:
                 result = await handle_reindex_all()
-<<<<<<< HEAD
-=======
         # 5-Agent Enforcer Tools
         elif name == "enforce_document":
             result = await handle_enforce_document(
@@ -429,7 +410,6 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
                 arguments["query"],
                 arguments.get("limit", 10)
             )
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
         else:
             result = {"error": f"Unknown tool: {name}"}
             
@@ -582,11 +562,7 @@ async def handle_reindex_all() -> dict:
     """Reindex everything (dangerous!)."""
     index = await get_index()
     result = await index.reindex_all()
-<<<<<<< HEAD
-    
-=======
 
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
     return {
         "success": True,
         "message": "Reindex complete",
@@ -594,8 +570,6 @@ async def handle_reindex_all() -> dict:
     }
 
 
-<<<<<<< HEAD
-=======
 # ============== Enforcer Tool Handlers ==============
 
 async def handle_enforce_document(
@@ -699,7 +673,6 @@ async def handle_search_pr_knowledge(query: str, limit: int) -> dict:
     }
 
 
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 # ============== Main Entry ==============
 
 async def main():

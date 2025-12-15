@@ -608,8 +608,6 @@ class TestIntegration:
         assert "Turkey" in result.verified.street_name
 
 
-<<<<<<< HEAD
-=======
 # ============================================================================
 # Puerto Rico Address Tests
 # ============================================================================
@@ -830,6 +828,5 @@ class TestPuertoRicoAddresses:
         assert len(urb_lookup) >= 1
 
 
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
