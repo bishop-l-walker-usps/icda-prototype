@@ -112,8 +112,7 @@ services:
     profiles:
       - mcp
 
-<<<<<<< HEAD
-=======
+
   # ============================================
   # MCP Knowledge Server (RAG for internal docs)
   # Start with: docker-compose --profile mcp up -d mcp-knowledge
@@ -155,7 +154,6 @@ services:
     profiles:
       - mcp
 
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 networks:
   icda-network:
     driver: bridge
@@ -164,7 +162,4 @@ volumes:
   redis_data:
   opensearch_data:
   mcp_data:
-<<<<<<< HEAD
-=======
   mcp_knowledge_data:
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
