@@ -48,7 +48,7 @@ BASE_DIR = Path(__file__).parent
 KNOWLEDGE_DIR = BASE_DIR / "knowledge"
 
 # Supported knowledge file extensions for auto-indexing
-KNOWLEDGE_EXTENSIONS = {".md", ".txt", ".json", ".pdf", ".docx", ".doc", ".odt"}
+KNOWLEDGE_EXTENSIONS = {".md", ".txt", ".json", ".pdf", ".docx", ".doc", ".odt", ".odf", ".csv", ".xls", ".xlsx"}
 
 # Globals
 _cache: RedisCache = None

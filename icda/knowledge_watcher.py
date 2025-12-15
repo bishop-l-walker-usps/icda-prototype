@@ -19,7 +19,14 @@ from watchdog.events import FileSystemEventHandler, FileCreatedEvent, FileModifi
 
 
 # Supported file extensions for auto-indexing
-SUPPORTED_EXTENSIONS = {'.txt', '.md', '.json', '.pdf', '.docx', '.doc', '.odt', '.odf'}
+SUPPORTED_EXTENSIONS = {
+    '.txt', '.md', '.json',           # Text
+    '.pdf',                            # PDF
+    '.doc', '.docx',                   # Word
+    '.xls', '.xlsx',                   # Excel
+    '.csv',                            # CSV
+    '.odt', '.odf',                    # OpenDocument
+}
 
 
 class KnowledgeFileHandler(FileSystemEventHandler):
