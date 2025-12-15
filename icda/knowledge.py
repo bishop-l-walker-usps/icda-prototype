@@ -33,11 +33,18 @@ class DocumentProcessor:
         suffix = path.suffix.lower()
 
         try:
-            if suffix in (".txt", ".md"):
+            # Plain text formats
+            if suffix in (".txt", ".md", ".markdown", ".log", ".cfg", ".ini", ".env",
+                          ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".yaml", ".yml",
+                          ".xml", ".rtf"):
                 content = path.read_text(encoding="utf-8", errors="ignore")
             elif suffix == ".json":
                 data = json.loads(path.read_text(encoding="utf-8"))
                 content = self._json_to_text(data)
+            elif suffix == ".csv":
+                content = self._read_csv(path)
+            elif suffix in (".html", ".htm"):
+                content = self._read_html(path)
             elif suffix == ".pdf":
                 content = self._read_pdf(path)
             elif suffix == ".docx":
@@ -46,7 +53,10 @@ class DocumentProcessor:
                 content = self._read_doc(path)
             elif suffix in (".odt", ".odf"):
                 content = self._read_odf(path)
+            elif suffix in (".xlsx", ".xls"):
+                content = self._read_excel(path)
             else:
+                # Try to read as text for any unknown format
                 content = path.read_text(encoding="utf-8", errors="ignore")
         except Exception as e:
             print(f"Error reading {path}: {e}")
@@ -205,6 +215,106 @@ class DocumentProcessor:
             return ""
         except Exception as e:
             print(f"Error reading ODF file: {e}")
+            return ""
+
+    def _read_csv(self, path: Path) -> str:
+        """Read CSV files and convert to readable text."""
+        try:
+            import csv
+            with open(path, 'r', encoding='utf-8', errors='ignore', newline='') as f:
+                reader = csv.reader(f)
+                rows = list(reader)
+
+            if not rows:
+                return ""
+
+            # First row as headers
+            headers = rows[0] if rows else []
+            content_parts = []
+
+            for i, row in enumerate(rows[1:], start=1):
+                row_text = ", ".join(
+                    f"{headers[j] if j < len(headers) else f'Col{j}'}: {cell}"
+                    for j, cell in enumerate(row) if cell.strip()
+                )
+                if row_text:
+                    content_parts.append(f"Row {i}: {row_text}")
+
+            return "\n".join(content_parts)
+        except Exception as e:
+            print(f"Error reading CSV file: {e}")
+            return ""
+
+    def _read_html(self, path: Path) -> str:
+        """Read HTML files and extract text content."""
+        try:
+            from html.parser import HTMLParser
+
+            class TextExtractor(HTMLParser):
+                def __init__(self):
+                    super().__init__()
+                    self.text_parts = []
+                    self.skip_tags = {'script', 'style', 'head', 'meta', 'link'}
+                    self.current_skip = False
+
+                def handle_starttag(self, tag, attrs):
+                    if tag.lower() in self.skip_tags:
+                        self.current_skip = True
+
+                def handle_endtag(self, tag):
+                    if tag.lower() in self.skip_tags:
+                        self.current_skip = False
+                    if tag.lower() in ('p', 'div', 'br', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li'):
+                        self.text_parts.append('\n')
+
+                def handle_data(self, data):
+                    if not self.current_skip:
+                        text = data.strip()
+                        if text:
+                            self.text_parts.append(text)
+
+            html_content = path.read_text(encoding='utf-8', errors='ignore')
+            parser = TextExtractor()
+            parser.feed(html_content)
+            return ' '.join(parser.text_parts)
+        except Exception as e:
+            print(f"Error reading HTML file: {e}")
+            return ""
+
+    def _read_excel(self, path: Path) -> str:
+        """Read Excel files (.xlsx, .xls) and convert to text."""
+        try:
+            import openpyxl
+            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+            content_parts = []
+
+            for sheet_name in wb.sheetnames:
+                sheet = wb[sheet_name]
+                content_parts.append(f"\n=== Sheet: {sheet_name} ===\n")
+
+                rows = list(sheet.iter_rows(values_only=True))
+                if not rows:
+                    continue
+
+                # First row as headers
+                headers = [str(h) if h else f"Col{i}" for i, h in enumerate(rows[0])]
+
+                for row_num, row in enumerate(rows[1:], start=1):
+                    row_text = ", ".join(
+                        f"{headers[j]}: {cell}"
+                        for j, cell in enumerate(row)
+                        if cell is not None and str(cell).strip()
+                    )
+                    if row_text:
+                        content_parts.append(f"Row {row_num}: {row_text}")
+
+            wb.close()
+            return "\n".join(content_parts)
+        except ImportError:
+            print("openpyxl not installed - Excel support disabled. Install with: pip install openpyxl")
+            return ""
+        except Exception as e:
+            print(f"Error reading Excel file: {e}")
             return ""
 
 

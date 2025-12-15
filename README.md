@@ -21,18 +21,16 @@ That's it! The app runs at http://localhost:8000
 ## Two Modes
 
 ### LITE MODE (Default - No AWS Required)
-- ✅ Customer database search & autocomplete
-- ✅ Address verification pipeline
-- ✅ Knowledge base (keyword search)
-- ✅ Full API functionality
-- ❌ AI-powered queries (needs AWS)
-- ❌ Semantic vector search (needs AWS)
+- Customer database search & autocomplete
+- Address verification pipeline
+- Knowledge base (keyword search)
+- Full API functionality
 
 ### FULL MODE (With AWS Credentials)
-- ✅ Everything in LITE MODE
-- ✅ Bedrock Nova AI assistant
-- ✅ Titan semantic embeddings
-- ✅ Vector similarity search
+- Everything in LITE MODE
+- Bedrock Nova AI assistant
+- Titan semantic embeddings
+- Vector similarity search
 
 To enable FULL MODE, add AWS credentials to `.env`:
 ```env
@@ -41,21 +39,6 @@ AWS_SECRET_ACCESS_KEY=your_secret
 AWS_REGION=us-east-1
 ```
 
-<<<<<<< HEAD
-## Optional: Redis & OpenSearch
-
-For production deployments, you can add:
-- **Redis**: Faster caching (app uses in-memory cache by default)
-- **OpenSearch**: Vector search (app uses keyword search by default)
-
-```bash
-# Start with Docker services
-docker-compose up -d redis opensearch
-```
-
-Then update `.env`:
-```env
-=======
 ## Docker Deployment
 
 ### Option 1: Core Services Only (Redis + OpenSearch)
@@ -85,7 +68,6 @@ AWS_SECRET_ACCESS_KEY=your_secret
 AWS_REGION=us-east-1
 
 # Services (auto-configured in Docker)
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 REDIS_URL=redis://localhost:6379
 OPENSEARCH_HOST=http://localhost:9200
 ```
@@ -121,16 +103,6 @@ icda-prototype/
 
 ## Adding Knowledge Documents
 
-<<<<<<< HEAD
-1. Add `.md` files to `knowledge/` folder
-2. Register in `main.py`:
-```python
-KNOWLEDGE_DOCUMENTS = [
-    {"file": "your-doc.md", "category": "category", "tags": ["tag1"]}
-]
-```
-3. Restart - auto-indexed on startup
-=======
 Just drop files into the `knowledge/` folder - they auto-index on startup!
 
 ```
@@ -142,7 +114,7 @@ knowledge/
 └── any-file.md            # Category = "general"
 ```
 
-**Supported formats:** `.md`, `.txt`, `.json`
+**Supported formats:** `.md`, `.txt`, `.json`, `.pdf`, `.docx`, `.xlsx`, `.csv`, `.html`, `.py`, `.js`, `.ts`, `.yaml`
 
 **Auto-tagging:** Add YAML frontmatter for custom tags:
 ```yaml
@@ -156,7 +128,6 @@ tags: [puerto-rico, validation, testing]
 - `pr-address-examples.md` → tags: `puerto-rico`, `addressing`, `examples`
 
 **Re-index manually:** `POST /api/knowledge/reindex`
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 
 ## License
 

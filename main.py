@@ -31,6 +31,7 @@ from icda.nova import NovaClient
 from icda.router import Router
 from icda.session import SessionManager
 from icda.knowledge import KnowledgeManager
+from icda.knowledge_watcher import KnowledgeWatcher
 
 # Address verification imports
 from icda.address_index import AddressIndex
@@ -46,20 +47,8 @@ cfg = Config()  # Fresh instance after dotenv loaded
 BASE_DIR = Path(__file__).parent
 KNOWLEDGE_DIR = BASE_DIR / "knowledge"
 
-<<<<<<< HEAD
-# Knowledge document registry - auto-indexed on startup
-KNOWLEDGE_DOCUMENTS = [
-    {
-        "file": "puerto-rico-urbanization-addressing.md",
-        "category": "address-standards",
-        "tags": ["puerto-rico", "urbanization", "usps", "addressing", "zip-codes", "postal"]
-    },
-    # Add more documents here as needed
-]
-=======
 # Supported knowledge file extensions for auto-indexing
-KNOWLEDGE_EXTENSIONS = {".md", ".txt", ".json"}
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
+KNOWLEDGE_EXTENSIONS = {".md", ".txt", ".json", ".pdf", ".docx", ".doc", ".odt"}
 
 # Globals
 _cache: RedisCache = None
@@ -70,6 +59,7 @@ _nova: NovaClient = None
 _sessions: SessionManager = None
 _router: Router = None
 _knowledge: KnowledgeManager = None
+_knowledge_watcher: KnowledgeWatcher = None
 
 # Address verification globals
 _address_index: AddressIndex = None
@@ -80,10 +70,6 @@ _address_vector_index: AddressVectorIndex = None
 _orchestrator: AddressAgentOrchestrator = None
 
 
-<<<<<<< HEAD
-async def auto_index_knowledge_documents(knowledge_manager: KnowledgeManager) -> dict:
-    """Auto-index knowledge documents from /knowledge directory on startup."""
-=======
 def _extract_tags_from_content(content: str, filepath: Path) -> list[str]:
     """Extract tags from file content or infer from filename/path."""
     tags = []
@@ -100,7 +86,6 @@ def _extract_tags_from_content(content: str, filepath: Path) -> list[str]:
                 else:
                     break
             if in_frontmatter and line.startswith("tags:"):
-                # Parse tags: [tag1, tag2] or tags:\n- tag1\n- tag2
                 tag_part = line.split(":", 1)[1].strip()
                 if tag_part.startswith("["):
                     tags.extend([t.strip().strip('"\'') for t in tag_part.strip("[]").split(",")])
@@ -114,19 +99,11 @@ def _extract_tags_from_content(content: str, filepath: Path) -> list[str]:
     if "example" in filename_lower:
         tags.append("examples")
 
-    return list(set(tags))  # Dedupe
+    return list(set(tags))
 
 
 async def auto_index_knowledge_documents(knowledge_manager: KnowledgeManager) -> dict:
-    """Auto-index all documents from /knowledge directory recursively.
-
-    Developers can just drop .md, .txt, or .json files into the knowledge folder
-    and they'll be automatically indexed on startup.
-
-    Category is inferred from parent folder name (e.g., address-standards/).
-    Tags are extracted from frontmatter or inferred from filename.
-    """
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
+    """Auto-index all documents from /knowledge directory recursively."""
     if not knowledge_manager or not knowledge_manager.available:
         return {"indexed": 0, "skipped": 0, "failed": 0}
 
@@ -140,36 +117,6 @@ async def auto_index_knowledge_documents(knowledge_manager: KnowledgeManager) ->
     skipped = 0
     failed = 0
 
-<<<<<<< HEAD
-    for doc_config in KNOWLEDGE_DOCUMENTS:
-        filepath = KNOWLEDGE_DIR / doc_config["file"]
-
-        if not filepath.exists():
-            print(f"  ⚠ Knowledge file not found: {doc_config['file']}")
-            failed += 1
-            continue
-
-        if doc_config["file"] in existing_filenames:
-            skipped += 1
-            continue
-
-        try:
-            result = await knowledge_manager.index_document(
-                content=filepath,
-                filename=doc_config["file"],
-                tags=doc_config.get("tags", []),
-                category=doc_config.get("category", "general")
-            )
-
-            if result.get("success"):
-                print(f"  ✓ Indexed: {doc_config['file']} ({result.get('chunks_indexed', 0)} chunks)")
-                indexed += 1
-            else:
-                print(f"  ✗ Failed: {doc_config['file']} - {result.get('error')}")
-                failed += 1
-        except Exception as e:
-            print(f"  ✗ Error: {doc_config['file']} - {e}")
-=======
     # Recursively find all knowledge files
     for filepath in KNOWLEDGE_DIR.rglob("*"):
         if not filepath.is_file():
@@ -177,25 +124,19 @@ async def auto_index_knowledge_documents(knowledge_manager: KnowledgeManager) ->
         if filepath.suffix.lower() not in KNOWLEDGE_EXTENSIONS:
             continue
         if filepath.name.startswith(".") or filepath.name == "README.md":
-            continue  # Skip hidden files and README
+            continue
 
-        # Get relative path for filename (preserves folder structure)
         relative_path = filepath.relative_to(KNOWLEDGE_DIR)
         filename = str(relative_path).replace("\\", "/")
 
-        # Skip if already indexed
         if filename in existing_filenames:
             skipped += 1
             continue
 
-        # Infer category from parent folder
-        if filepath.parent != KNOWLEDGE_DIR:
-            category = filepath.parent.name
-        else:
-            category = "general"
+        category = filepath.parent.name if filepath.parent != KNOWLEDGE_DIR else "general"
 
         try:
-            content = filepath.read_text(encoding="utf-8")
+            content = filepath.read_text(encoding="utf-8", errors="ignore")
             tags = _extract_tags_from_content(content, filepath)
 
             result = await knowledge_manager.index_document(
@@ -213,7 +154,6 @@ async def auto_index_knowledge_documents(knowledge_manager: KnowledgeManager) ->
                 failed += 1
         except Exception as e:
             print(f"  ✗ Error: {filename} - {e}")
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
             failed += 1
 
     return {"indexed": indexed, "skipped": skipped, "failed": failed}
@@ -221,7 +161,7 @@ async def auto_index_knowledge_documents(knowledge_manager: KnowledgeManager) ->
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _cache, _embedder, _vector_index, _db, _nova, _sessions, _router, _knowledge
+    global _cache, _embedder, _vector_index, _db, _nova, _sessions, _router, _knowledge, _knowledge_watcher
     global _address_index, _address_completer, _address_pipeline
     global _zip_database, _address_vector_index, _orchestrator
 
@@ -283,28 +223,38 @@ async def lifespan(app: FastAPI):
     _knowledge = KnowledgeManager(_embedder, opensearch_client)
     await _knowledge.ensure_index()
 
-<<<<<<< HEAD
-    # Auto-index knowledge documents
-    if KNOWLEDGE_DIR.exists() and KNOWLEDGE_DOCUMENTS:
-        print("Auto-indexing knowledge documents...")
-=======
     # Auto-index knowledge documents (scans /knowledge folder recursively)
     if KNOWLEDGE_DIR.exists():
         print("Auto-indexing knowledge documents from /knowledge folder...")
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
         result = await auto_index_knowledge_documents(_knowledge)
         if result["indexed"]:
             print(f"  New: {result['indexed']}")
         if result["skipped"]:
             print(f"  Skipped (existing): {result['skipped']}")
-<<<<<<< HEAD
-=======
         if result["failed"]:
             print(f"  Failed: {result['failed']}")
->>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 
     stats = await _knowledge.get_stats()
     print(f"  Knowledge base: {stats.get('unique_documents', 0)} docs, {stats.get('total_chunks', 0)} chunks ({stats.get('backend', 'unknown')})")
+
+    # Start knowledge file watcher for auto-indexing new files
+    async def index_file_callback(filepath: Path) -> dict:
+        """Callback for file watcher to index new files."""
+        try:
+            content = filepath.read_text(encoding="utf-8", errors="ignore")
+            tags = _extract_tags_from_content(content, filepath)
+            category = filepath.parent.name if filepath.parent != KNOWLEDGE_DIR else "general"
+            return await _knowledge.index_document(
+                content=filepath,
+                filename=filepath.name,
+                tags=tags,
+                category=category
+            )
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    _knowledge_watcher = KnowledgeWatcher(KNOWLEDGE_DIR, index_file_callback)
+    _knowledge_watcher.start()
 
     # Print mode summary
     mode = "FULL" if _nova.available and _embedder.available else "LITE"
@@ -319,6 +269,8 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    if _knowledge_watcher:
+        _knowledge_watcher.stop()
     await _cache.close()
     await _vector_index.close()
     if _address_vector_index:

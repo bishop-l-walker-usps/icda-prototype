@@ -14,3 +14,11 @@ boto3==1.35.86
 # OpenSearch (optional - for vector search)
 # Uncomment if you need semantic search:
 # opensearch-py[async]==3.1.0
+
+# File watching (for auto-indexing knowledge documents)
+watchdog==4.0.0
+
+# Document parsing (optional - for various file format support)
+pypdf==5.1.0
+python-docx==1.1.2
+openpyxl==3.1.5

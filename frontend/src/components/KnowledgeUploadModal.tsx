@@ -82,16 +82,30 @@ export const KnowledgeUploadModal: React.FC<KnowledgeUploadModalProps> = ({
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      'text/plain': ['.txt'],
-      'text/markdown': ['.md'],
+      // Text formats
+      'text/plain': ['.txt', '.log', '.cfg', '.ini', '.env'],
+      'text/markdown': ['.md', '.markdown'],
+      'text/html': ['.html', '.htm'],
+      'text/csv': ['.csv'],
+      'text/xml': ['.xml'],
+      'application/json': ['.json'],
+      'application/rtf': ['.rtf'],
+      // Documents
       'application/pdf': ['.pdf'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
       'application/msword': ['.doc'],
       'application/vnd.oasis.opendocument.text': ['.odt', '.odf'],
-      'application/json': ['.json'],
+      // Spreadsheets
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'application/vnd.ms-excel': ['.xls'],
+      // Code files
+      'text/x-python': ['.py'],
+      'text/javascript': ['.js', '.ts', '.jsx', '.tsx'],
+      'text/x-java': ['.java'],
+      'text/x-yaml': ['.yaml', '.yml'],
     },
     maxFiles: 1,
-    maxSize: 10 * 1024 * 1024, // 10MB
+    maxSize: 25 * 1024 * 1024, // 25MB
   });
 
   const handleUpload = async () => {
@@ -231,7 +245,7 @@ export const KnowledgeUploadModal: React.FC<KnowledgeUploadModalProps> = ({
                     {isDragActive ? 'Drop file here' : 'Drag & drop or click to select'}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Supports: .txt, .md, .pdf, .docx, .doc, .odt, .json (max 10MB)
+                    Supports: txt, md, pdf, docx, xlsx, csv, html, json, yaml, py, js, ts (max 25MB)
                   </Typography>
                 </>
               )}
