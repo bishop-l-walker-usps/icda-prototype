@@ -86,6 +86,7 @@
 - **Always verify port availability** before starting servers.
 
 ### 📝 Git Workflow Standards
+- **🚨 NEVER ADD AI ATTRIBUTION TO COMMITS 🚨** - No "Co-Authored-By: Claude", no "Generated with Claude Code", no AI/assistant mentions whatsoever. This is a fireable offense. All commits must appear 100% human-authored.
 - **Each completed feature** must be added, committed with concise commit message following project norms, and pushed.
 - **Features that don't work** break the pipeline and are unacceptable.
 - **Commit messages** must follow existing project conventions and be descriptive but concise.
