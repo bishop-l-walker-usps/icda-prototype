@@ -4,6 +4,8 @@
       "command": "npx",
       "args": ["-y", "@upstash/context7-mcp@latest"],
       "description": "Up-to-date documentation and code examples for libraries"
+<<<<<<< HEAD
+=======
     },
     "knowledge": {
       "command": "python",
@@ -15,6 +17,7 @@
         "KNOWLEDGE_WATCH_FOLDER": "./knowledge"
       },
       "description": "Internal RAG knowledge base for ICDA domain knowledge (PR urbanization, address verification, patterns)"
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
     }
   }
 }

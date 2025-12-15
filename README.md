@@ -41,6 +41,21 @@ AWS_SECRET_ACCESS_KEY=your_secret
 AWS_REGION=us-east-1
 ```
 
+<<<<<<< HEAD
+## Optional: Redis & OpenSearch
+
+For production deployments, you can add:
+- **Redis**: Faster caching (app uses in-memory cache by default)
+- **OpenSearch**: Vector search (app uses keyword search by default)
+
+```bash
+# Start with Docker services
+docker-compose up -d redis opensearch
+```
+
+Then update `.env`:
+```env
+=======
 ## Docker Deployment
 
 ### Option 1: Core Services Only (Redis + OpenSearch)
@@ -70,6 +85,7 @@ AWS_SECRET_ACCESS_KEY=your_secret
 AWS_REGION=us-east-1
 
 # Services (auto-configured in Docker)
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 REDIS_URL=redis://localhost:6379
 OPENSEARCH_HOST=http://localhost:9200
 ```
@@ -105,6 +121,16 @@ icda-prototype/
 
 ## Adding Knowledge Documents
 
+<<<<<<< HEAD
+1. Add `.md` files to `knowledge/` folder
+2. Register in `main.py`:
+```python
+KNOWLEDGE_DOCUMENTS = [
+    {"file": "your-doc.md", "category": "category", "tags": ["tag1"]}
+]
+```
+3. Restart - auto-indexed on startup
+=======
 Just drop files into the `knowledge/` folder - they auto-index on startup!
 
 ```
@@ -130,6 +156,7 @@ tags: [puerto-rico, validation, testing]
 - `pr-address-examples.md` → tags: `puerto-rico`, `addressing`, `examples`
 
 **Re-index manually:** `POST /api/knowledge/reindex`
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 
 ## License
 

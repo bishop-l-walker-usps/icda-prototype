@@ -118,6 +118,8 @@ UNIT_TYPES: set[str] = {
     "floor", "fl", "room", "rm", "#",
 }
 
+<<<<<<< HEAD
+=======
 # Puerto Rico ZIP code prefixes (006-009)
 PR_ZIP_PREFIXES: tuple[str, ...] = ("006", "007", "008", "009")
 
@@ -155,6 +157,7 @@ def is_puerto_rico_zip(zip_code: str | None) -> bool:
         return False
     return zip_code[:3] in PR_ZIP_PREFIXES
 
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 
 class AddressNormalizer:
     """Normalizes and parses address strings into structured components.
@@ -176,6 +179,8 @@ class AddressNormalizer:
         r"\b([A-Za-z]{2})\s*(?:,?\s*\d{5}|\s*$)",
         re.IGNORECASE,
     )
+<<<<<<< HEAD
+=======
     # Puerto Rico urbanization pattern - captures text after URB/URBANIZACION
     # until a street indicator (CALLE, AVE, number, comma) or end
     _URB_PATTERN = re.compile(
@@ -187,6 +192,7 @@ class AddressNormalizer:
         r"\b(?:urb|urbanizacion|urbanización)\s+([A-Za-z][A-Za-z\s]*?)(?:\s+(?:calle|ave|avenida|apt|apartamento|\d)|,|$)",
         re.IGNORECASE,
     )
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 
     @classmethod
     def normalize(cls, raw: str) -> ParsedAddress:
@@ -215,6 +221,8 @@ class AddressNormalizer:
         else:
             components_missing.append(AddressComponent.ZIP_CODE)
 
+<<<<<<< HEAD
+=======
         # Detect Puerto Rico by ZIP code
         is_pr = is_puerto_rico_zip(zip_code)
 
@@ -225,17 +233,22 @@ class AddressNormalizer:
             if urbanization:
                 components_found.append(AddressComponent.URBANIZATION)
 
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
         # Extract state
         state, cleaned = cls._extract_state(cleaned)
         if state:
             components_found.append(AddressComponent.STATE)
         else:
+<<<<<<< HEAD
+            components_missing.append(AddressComponent.STATE)
+=======
             # For PR addresses, default state to PR if not found
             if is_pr:
                 state = "PR"
                 components_found.append(AddressComponent.STATE)
             else:
                 components_missing.append(AddressComponent.STATE)
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
 
         # Extract unit/apartment
         unit, cleaned = cls._extract_unit(cleaned)
@@ -250,7 +263,11 @@ class AddressNormalizer:
             components_missing.append(AddressComponent.STREET_NUMBER)
 
         # Extract street name and type from remaining text
+<<<<<<< HEAD
+        street_name, street_type, city = cls._extract_street_and_city(cleaned)
+=======
         street_name, street_type, city = cls._extract_street_and_city(cleaned, is_pr)
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
         if street_name:
             components_found.append(AddressComponent.STREET_NAME)
         else:
@@ -272,13 +289,18 @@ class AddressNormalizer:
             state=state,
             zip_code=zip_code,
             zip_plus4=zip_plus4,
+<<<<<<< HEAD
+=======
             urbanization=urbanization,
             is_puerto_rico=is_pr,
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
             components_found=components_found,
             components_missing=components_missing,
         )
 
     @classmethod
+<<<<<<< HEAD
+=======
     def _extract_urbanization(cls, text: str) -> tuple[str | None, str]:
         """Extract Puerto Rico urbanization from text.
 
@@ -317,6 +339,7 @@ class AddressNormalizer:
         return None, text
 
     @classmethod
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
     def classify(cls, parsed: ParsedAddress) -> AddressClassification:
         """Classify the quality of a parsed address.
 
@@ -410,6 +433,8 @@ class AddressNormalizer:
             issues.append("Street type not specified")
             suggestions.append("Street type (St, Ave, Blvd, etc.) may be needed")
 
+<<<<<<< HEAD
+=======
         # Puerto Rico specific validation
         if parsed.is_puerto_rico and not parsed.urbanization:
             # PR addresses without urbanization are problematic for deliverability
@@ -420,6 +445,7 @@ class AddressNormalizer:
                 quality = AddressQuality.PARTIAL
             confidence *= 0.8  # Reduce confidence for missing URB
 
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
         return AddressClassification(
             quality=quality,
             confidence=confidence,
@@ -501,6 +527,11 @@ class AddressNormalizer:
     def _extract_street_and_city(
         cls,
         text: str,
+<<<<<<< HEAD
+    ) -> tuple[str | None, str | None, str | None]:
+        """Extract street name, type, and city from remaining text.
+
+=======
         is_puerto_rico: bool = False,
     ) -> tuple[str | None, str | None, str | None]:
         """Extract street name, type, and city from remaining text.
@@ -509,17 +540,21 @@ class AddressNormalizer:
             text: Remaining address text after other extractions.
             is_puerto_rico: If True, handle Spanish street terminology.
 
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
         Returns:
             Tuple of (street_name, street_type, city).
         """
         if not text:
             return None, None, None
 
+<<<<<<< HEAD
+=======
         # For PR addresses, handle Spanish prefixes like CALLE
         if is_puerto_rico:
             # Remove CALLE prefix if present (it's a prefix in Spanish, not suffix)
             text = re.sub(r"\bcalle\s+", "", text, flags=re.IGNORECASE)
 
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
         # Split on comma to separate street from city
         parts = [p.strip() for p in text.split(",") if p.strip()]
 
@@ -541,6 +576,8 @@ class AddressNormalizer:
             if last_word_lower in STREET_TYPES:
                 street_type = STREET_TYPES[last_word_lower]
                 street_name = " ".join(words[:-1])
+<<<<<<< HEAD
+=======
             # Check Spanish street types for PR
             elif is_puerto_rico and last_word_lower in SPANISH_STREET_TERMS:
                 spanish_type = SPANISH_STREET_TERMS[last_word_lower]
@@ -549,6 +586,7 @@ class AddressNormalizer:
                     street_name = " ".join(words[:-1])
                 else:
                     street_name = " ".join(words)
+>>>>>>> 04ca1a3554d0e96a498278e69485ff09f1595add
             else:
                 street_name = " ".join(words)
 
