@@ -356,26 +356,24 @@ async def query(req: QueryRequest):
 
 @app.get("/api/health")
 async def health():
-    """Health check with mode status"""
+    """Health check with mode status - flat structure for frontend compatibility"""
     nova_ok = _nova.available if _nova else False
     embedder_ok = _embedder.available if _embedder else False
+    redis_ok = _cache.available if _cache else False
+    opensearch_ok = _vector_index.available if _vector_index else False
     mode = "FULL" if nova_ok and embedder_ok else "LITE"
 
+    # Flat structure expected by frontend
     return {
         "status": "healthy",
         "mode": mode,
-        "services": {
-            "redis": _cache.available if _cache else False,
-            "opensearch": _vector_index.available if _vector_index else False,
-            "embeddings": embedder_ok,
-            "nova_ai": nova_ok,
-            "knowledge": _knowledge.available if _knowledge else False,
-        },
-        "data": {
-            "customers": len(_db.customers) if _db else 0,
-            "knowledge_backend": _knowledge._memory_store is not None and not _knowledge.use_opensearch 
-                                 if _knowledge else "unavailable"
-        }
+        "redis": redis_ok,
+        "opensearch": opensearch_ok,
+        "embedder": embedder_ok,
+        "nova": nova_ok,
+        "customers": len(_db.customers) if _db else 0,
+        # Extended info
+        "knowledge": _knowledge.available if _knowledge else False,
     }
 
 

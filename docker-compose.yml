@@ -32,8 +32,7 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
-      - AWS_PROFILE=${AWS_PROFILE:-}
-      - NOVA_MODEL=${NOVA_MODEL:-us.amazon.nova-micro-v1:0}
+      - NOVA_MODEL=${NOVA_MODEL:-us.amazon.nova-pro-v1:0}
       - TITAN_EMBED_MODEL=${TITAN_EMBED_MODEL:-amazon.titan-embed-text-v2:0}
 
       # Infrastructure (required - using Docker service names)
