@@ -26,11 +26,14 @@ services:
     container_name: icda
     ports:
       - "8000:8000"
+    volumes:
+      # Mount AWS credentials from host (enables "just works" with aws configure)
+      - ~/.aws:/root/.aws:ro
     environment:
-      # AWS Configuration (optional - for AI features)
+      # AWS Configuration - reads from mounted ~/.aws or env vars
       - AWS_REGION=${AWS_REGION:-us-east-1}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
       - NOVA_MODEL=${NOVA_MODEL:-us.amazon.nova-pro-v1:0}
       - TITAN_EMBED_MODEL=${TITAN_EMBED_MODEL:-amazon.titan-embed-text-v2:0}
