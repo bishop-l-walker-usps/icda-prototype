@@ -34,7 +34,7 @@ from icda.knowledge import KnowledgeManager
 from icda.knowledge_watcher import KnowledgeWatcher
 
 # Gemini Enforcer imports
-from icda.gemini import GeminiEnforcer
+from icda.gemini import GeminiEnforcer, GeminiConfig
 
 # Address verification imports
 from icda.address_index import AddressIndex
@@ -274,7 +274,16 @@ async def lifespan(app: FastAPI):
 
     # Initialize Gemini Enforcer (optional, graceful degradation if no API key)
     print("\nInitializing Gemini Enforcer...")
-    _enforcer = GeminiEnforcer(cfg)
+    gemini_config = GeminiConfig(
+        api_key=cfg.gemini_api_key,
+        model=cfg.gemini_model,
+    )
+    _enforcer = GeminiEnforcer(
+        config=gemini_config,
+        chunk_threshold=cfg.gemini_chunk_threshold,
+        query_sample_rate=cfg.gemini_query_sample_rate,
+        validation_interval_hours=cfg.gemini_validation_interval,
+    )
     if _enforcer.available:
         print(f"  Enforcer: enabled (model: {cfg.gemini_model})")
         print(f"  - L1 Chunk Gate: threshold {cfg.gemini_chunk_threshold}")

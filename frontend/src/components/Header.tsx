@@ -231,7 +231,7 @@ export const Header: React.FC<HeaderProps> = ({
         </Tooltip>
 
         {/* Customer Count */}
-        {health && (
+        {health && health.customers != null && (
           <Chip
             label={`${health.customers.toLocaleString()} customers`}
             size="small"
