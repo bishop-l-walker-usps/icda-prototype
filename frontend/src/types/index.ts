@@ -1,3 +1,21 @@
+// Standardized Error Types
+export interface ApiError {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export interface ApiErrorResponse {
+  success: false;
+  error: ApiError;
+}
+
+// Validation Types
+export interface ValidationResult {
+  valid: boolean;
+  message: string;
+}
+
 // API Types
 export interface GuardrailFlags {
   pii: boolean;
@@ -75,6 +93,22 @@ export interface AddressVerificationResponse {
   verified: number;
   failed: number;
   results: AddressRecord[];
+}
+
+// Single Address Verification Types
+export interface SingleAddressVerificationResponse {
+  success: boolean;
+  status: string;  // 'verified' | 'corrected' | 'completed' | 'unverified' | 'failed'
+  original: Record<string, unknown>;
+  verified: Record<string, unknown> | null;
+  confidence: number;
+  match_type: string | null;
+  alternatives: Record<string, unknown>[];
+  processing_time_ms: number;
+  metadata: Record<string, unknown>;
+  is_puerto_rico: boolean;
+  urbanization: string | null;
+  pr_warnings: string[];
 }
 
 // UI Types

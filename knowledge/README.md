@@ -11,6 +11,17 @@ knowledge/
 ├── address-standards/           # Address format standards and rules
 │   ├── puerto-rico-urbanization-addressing.md
 │   └── usps-address-format-standards.md (planned)
+├── aws-bedrock/                 # AWS Bedrock documentation (AI/ML)
+│   ├── README.md                # Overview and quick reference
+│   ├── 01-overview-getting-started.md
+│   ├── 02-supported-models.md
+│   ├── 03-converse-api.md
+│   ├── 04-tool-use-function-calling.md
+│   ├── 05-agents.md
+│   ├── 06-knowledge-bases-rag.md
+│   ├── 07-guardrails.md
+│   ├── 08-python-sdk-examples.md
+│   └── 09-prompt-engineering.md
 ├── patterns/                    # Domain patterns and validation rules
 │   ├── pr-urbanization-patterns.md (planned)
 │   ├── verification-rules.md (planned)
@@ -30,6 +41,18 @@ Official address format standards including:
 - Puerto Rico urbanization rules (ZIP 006-009)
 - USPS address formatting guidelines
 - State-specific address quirks
+
+### aws-bedrock
+Amazon Bedrock AI/ML documentation including:
+- Service overview and getting started
+- Supported foundation models (Claude, Titan, Nova, Llama, Mistral)
+- Converse API for multi-turn conversations
+- Tool use / function calling
+- Bedrock Agents and action groups
+- Knowledge bases and RAG architecture
+- Guardrails for content safety
+- Python SDK examples
+- Prompt engineering best practices
 
 ### patterns
 Domain patterns for address verification:
