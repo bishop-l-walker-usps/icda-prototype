@@ -295,6 +295,22 @@ class ParserAgent:
                     filters["city"] = city
                     break
 
+        # Extract customer type filter
+        if any(word in query_lower for word in ["business", "company", "companies", "corporate"]):
+            filters["customer_type"] = "BUSINESS"
+            notes.append("Customer type: BUSINESS")
+        elif any(word in query_lower for word in ["residential", "homeowner", "renter"]):
+            filters["customer_type"] = "RESIDENTIAL"
+            notes.append("Customer type: RESIDENTIAL")
+        elif "po box" in query_lower or "pobox" in query_lower:
+            filters["customer_type"] = "PO_BOX"
+            notes.append("Customer type: PO_BOX")
+
+        # Extract apartment filter
+        if any(word in query_lower for word in ["apartment", "apt", "unit", "condo"]):
+            filters["has_apartment"] = True
+            notes.append("Filter: apartment/unit addresses only")
+
         return filters
 
     def _extract_date_range(

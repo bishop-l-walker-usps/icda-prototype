@@ -36,6 +36,7 @@ COPY main.py .
 COPY customer_data.json .
 COPY icda/ ./icda/
 COPY templates/ ./templates/
+COPY knowledge/ ./knowledge/
 
 # Copy built frontend from builder stage
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist

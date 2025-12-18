@@ -65,13 +65,15 @@ QUERY INTERPRETATION:
     TOOLS = [
         {"toolSpec": {"name": "lookup_crid", "description": "Look up a specific customer by their CRID (Customer Record ID). Use when user mentions a specific CRID or customer ID.",
             "inputSchema": {"json": {"type": "object", "properties": {"crid": {"type": "string", "description": "The Customer Record ID (e.g., CRID-00001)"}}, "required": ["crid"]}}}},
-        {"toolSpec": {"name": "search_customers", "description": "Search for customers with flexible filters. Use when user asks about customers in a state/city, customers who moved, or general customer searches. Interpret informal language: 'Nevada folks'=state NV, 'high movers'=min_move_count 3+, 'California customers'=state CA.",
+        {"toolSpec": {"name": "search_customers", "description": "Search and COUNT customers with filters. USE THIS for any filtered queries like 'customers in California', 'apartment renters', 'how many residential customers', etc. Returns matching customers with total count.",
             "inputSchema": {"json": {"type": "object", "properties": {
-                "state": {"type": "string", "description": "Two-letter state code (NV, CA, TX, NY, FL, etc). Convert state names to codes."},
+                "state": {"type": "string", "description": "Two-letter state code (NV, CA, TX, NY, FL, etc). Convert state names: California=CA, Nevada=NV, Texas=TX."},
                 "city": {"type": "string", "description": "City name to filter by"},
                 "min_move_count": {"type": "integer", "description": "Minimum number of moves. Use 2-3 for 'frequent movers', 5+ for 'high movers'"},
+                "customer_type": {"type": "string", "description": "Customer type: RESIDENTIAL (renters, homeowners), BUSINESS (companies), or PO_BOX. Use RESIDENTIAL for 'renters' or 'apartment' queries."},
+                "has_apartment": {"type": "boolean", "description": "Set true to filter for apartment/unit addresses only (addresses containing Apt or Unit). Use for 'apartment renters' queries."},
                 "limit": {"type": "integer", "description": "Max results to return (default 10, max 100)"}}}}}},
-        {"toolSpec": {"name": "get_stats", "description": "Get overall customer statistics including counts by state. Use for questions like 'how many customers', 'totals', 'breakdown', or any aggregate data questions.",
+        {"toolSpec": {"name": "get_stats", "description": "Get ONLY overall statistics by state (no filters). Use ONLY for general breakdowns like 'show stats' or 'breakdown by state'. Do NOT use for filtered counts - use search_customers instead.",
             "inputSchema": {"json": {"type": "object", "properties": {}}}}}
     ]
 
@@ -85,9 +87,10 @@ QUERY INTERPRETATION:
         address_orchestrator=None,
         session_store=None,
         guardrails=None,
+        gemini_enforcer=None,
         use_orchestrator: bool = True,
     ):
-        """Initialize NovaClient with optional 8-agent pipeline.
+        """Initialize NovaClient with optional 7-agent pipeline + Gemini enforcer.
 
         Args:
             region: AWS region for Bedrock.
@@ -98,6 +101,7 @@ QUERY INTERPRETATION:
             address_orchestrator: Optional address verification orchestrator.
             session_store: Optional session store for context.
             guardrails: Optional Guardrails for PII filtering.
+            gemini_enforcer: Optional GeminiEnforcer for AI-powered validation.
             use_orchestrator: Whether to use 8-agent pipeline (default True).
         """
         self.model = model
@@ -117,7 +121,7 @@ QUERY INTERPRETATION:
             self.available = True
             logger.info(f"Nova: Connected ({model})")
 
-            # Initialize 8-agent orchestrator if enabled
+            # Initialize 7-agent orchestrator + Gemini enforcer if enabled
             if use_orchestrator:
                 try:
                     self._orchestrator = create_query_orchestrator(
@@ -129,8 +133,10 @@ QUERY INTERPRETATION:
                         address_orchestrator=address_orchestrator,
                         session_store=session_store,
                         guardrails=guardrails,
+                        gemini_enforcer=gemini_enforcer,
                     )
-                    logger.info("Nova: 8-agent orchestrator enabled")
+                    gemini_status = "with Gemini" if (gemini_enforcer and gemini_enforcer.available) else "without Gemini"
+                    logger.info(f"Nova: 7-agent orchestrator enabled ({gemini_status})")
                 except Exception as e:
                     logger.warning(f"Nova: Orchestrator init failed, using simple mode - {e}")
                     self._orchestrator = None
