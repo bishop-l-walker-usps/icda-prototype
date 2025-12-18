@@ -50,6 +50,118 @@ class SearchStrategy(str, Enum):
     KEYWORD = "keyword"         # Simple keyword matching
 
 
+class ModelTier(str, Enum):
+    """Nova model tiers for routing."""
+    MICRO = "nova-micro"
+    LITE = "nova-lite"
+    PRO = "nova-pro"
+    FALLBACK = "fallback"
+
+
+# ============================================================================
+# Token and Pagination Dataclasses
+# ============================================================================
+
+@dataclass(slots=True)
+class TokenUsage:
+    """Token usage statistics from a model call.
+
+    Attributes:
+        input_tokens: Number of input tokens consumed.
+        output_tokens: Number of output tokens generated.
+        total_tokens: Total tokens used.
+        context_limit: Maximum context window size.
+    """
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    context_limit: int = 200000
+
+    def __add__(self, other: "TokenUsage") -> "TokenUsage":
+        """Allow aggregation of token usage across multiple calls."""
+        return TokenUsage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            total_tokens=self.total_tokens + other.total_tokens,
+            context_limit=self.context_limit,
+        )
+
+    @property
+    def percentage_used(self) -> float:
+        """Calculate percentage of context window used."""
+        if self.context_limit <= 0:
+            return 0.0
+        return (self.total_tokens / self.context_limit) * 100
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens,
+            "context_limit": self.context_limit,
+            "percentage_used": round(self.percentage_used, 2),
+        }
+
+
+@dataclass(slots=True)
+class PaginationInfo:
+    """Pagination metadata for large result sets.
+
+    Attributes:
+        total_count: Total number of matching records.
+        returned_count: Number of records returned in response.
+        has_more: Whether there are more results available.
+        suggest_download: True if results exceed display limit.
+        download_token: Token for fetching full results via download endpoint.
+        preview_size: Number of results shown as preview.
+    """
+    total_count: int
+    returned_count: int
+    has_more: bool
+    suggest_download: bool
+    download_token: str | None = None
+    preview_size: int = 15
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary representation."""
+        result = {
+            "total_count": self.total_count,
+            "returned_count": self.returned_count,
+            "has_more": self.has_more,
+            "suggest_download": self.suggest_download,
+            "preview_size": self.preview_size,
+        }
+        if self.download_token:
+            result["download_token"] = self.download_token
+        return result
+
+
+@dataclass(slots=True)
+class ModelRoutingDecision:
+    """Result of model routing decision.
+
+    Attributes:
+        model_id: Full model ID for Bedrock.
+        model_tier: Model tier (micro/lite/pro).
+        reason: Explanation for the routing decision.
+        confidence_factor: Confidence that influenced decision.
+    """
+    model_id: str
+    model_tier: ModelTier
+    reason: str
+    confidence_factor: float = 1.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "model_id": self.model_id,
+            "model_tier": self.model_tier.value,
+            "reason": self.reason,
+            "confidence_factor": self.confidence_factor,
+        }
+
+
 # ============================================================================
 # Agent Result Dataclasses
 # ============================================================================
@@ -257,27 +369,32 @@ class NovaResponse:
         tools_used: Tools that were called.
         tool_results: Results from tool calls.
         model_used: Which Nova model was used.
-        tokens_used: Token count.
+        token_usage: Token usage statistics.
         ai_confidence: Confidence in response.
         raw_response: Raw API response for debugging.
+        routing_decision: Model routing decision info.
     """
     response_text: str
     tools_used: list[str] = field(default_factory=list)
     tool_results: list[dict[str, Any]] = field(default_factory=list)
     model_used: str = "nova-micro"
-    tokens_used: int = 0
+    token_usage: TokenUsage = field(default_factory=TokenUsage)
     ai_confidence: float = 0.0
     raw_response: dict[str, Any] | None = None
+    routing_decision: ModelRoutingDecision | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
-        return {
+        result = {
             "response_text": self.response_text,
             "tools_used": self.tools_used,
             "model_used": self.model_used,
-            "tokens_used": self.tokens_used,
+            "token_usage": self.token_usage.to_dict(),
             "ai_confidence": self.ai_confidence,
         }
+        if self.routing_decision:
+            result["routing_decision"] = self.routing_decision.to_dict()
+        return result
 
 
 @dataclass(slots=True)
@@ -336,38 +453,113 @@ class EnforcedResponse:
 
 @dataclass(slots=True)
 class PipelineStage:
-    """Record of a single pipeline stage execution."""
+    """Record of a single pipeline stage execution.
+
+    Attributes:
+        agent: Agent name (intent, context, parser, etc.).
+        output: Output data from the agent.
+        time_ms: Execution time in milliseconds.
+        success: Whether the stage completed successfully.
+        error: Error message if failed.
+        confidence: Confidence score from the agent.
+        token_usage: Token usage for this stage (if applicable).
+        route_decision: Routing decision made in this stage.
+        debug_info: Additional debug information.
+    """
     agent: str
     output: dict[str, Any]
     time_ms: int
     success: bool = True
     error: str | None = None
+    confidence: float | None = None
+    token_usage: TokenUsage | None = None
+    route_decision: dict[str, Any] | None = None
+    debug_info: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
-        return {
+        result = {
             "agent": self.agent,
             "output": self.output,
             "time_ms": self.time_ms,
             "success": self.success,
             "error": self.error,
         }
+        if self.confidence is not None:
+            result["confidence"] = self.confidence
+        if self.token_usage:
+            result["token_usage"] = self.token_usage.to_dict()
+        if self.route_decision:
+            result["route_decision"] = self.route_decision
+        if self.debug_info:
+            result["debug_info"] = self.debug_info
+        return result
 
 
 @dataclass(slots=True)
 class PipelineTrace:
-    """Complete trace of pipeline execution."""
+    """Complete trace of pipeline execution.
+
+    Attributes:
+        stages: List of pipeline stages executed.
+        total_time_ms: Total execution time.
+        success: Whether pipeline completed successfully.
+        total_token_usage: Aggregated token usage across all stages.
+        model_routing_decision: Final model routing decision.
+        min_confidence: Minimum confidence across all stages.
+    """
     stages: list[PipelineStage] = field(default_factory=list)
     total_time_ms: int = 0
     success: bool = True
+    total_token_usage: TokenUsage = field(default_factory=TokenUsage)
+    model_routing_decision: ModelRoutingDecision | None = None
+    min_confidence: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
-        return {
+        result = {
             "stages": [s.to_dict() for s in self.stages],
             "total_time_ms": self.total_time_ms,
             "success": self.success,
+            "total_token_usage": self.total_token_usage.to_dict(),
         }
+        if self.model_routing_decision:
+            result["model_routing_decision"] = self.model_routing_decision.to_dict()
+        if self.min_confidence is not None:
+            result["min_confidence"] = self.min_confidence
+        return result
+
+    def add_stage(
+        self,
+        agent: str,
+        output: dict[str, Any],
+        time_ms: int,
+        success: bool = True,
+        error: str | None = None,
+        confidence: float | None = None,
+        token_usage: TokenUsage | None = None,
+    ) -> PipelineStage:
+        """Add a new stage to the trace."""
+        stage = PipelineStage(
+            agent=agent,
+            output=output,
+            time_ms=time_ms,
+            success=success,
+            error=error,
+            confidence=confidence,
+            token_usage=token_usage,
+        )
+        self.stages.append(stage)
+
+        # Update aggregates
+        if confidence is not None:
+            if self.min_confidence is None or confidence < self.min_confidence:
+                self.min_confidence = confidence
+
+        if token_usage:
+            self.total_token_usage = self.total_token_usage + token_usage
+
+        return stage
 
 
 @dataclass(slots=True)
@@ -383,6 +575,12 @@ class QueryResult:
         latency_ms: Total latency.
         trace: Pipeline execution trace.
         metadata: Additional metadata.
+        token_usage: Total token usage for the query.
+        pagination: Pagination info for large result sets.
+        model_used: Which Nova model was used.
+        guardrails_active: Whether guardrails were active.
+        guardrails_bypassed: Whether guardrails were bypassed.
+        results: Raw search results for pagination display.
     """
     success: bool
     response: str
@@ -392,10 +590,16 @@ class QueryResult:
     latency_ms: int = 0
     trace: PipelineTrace | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    token_usage: TokenUsage = field(default_factory=TokenUsage)
+    pagination: PaginationInfo | None = None
+    model_used: str = "nova-micro"
+    guardrails_active: bool = True
+    guardrails_bypassed: bool = False
+    results: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
-        return {
+        result = {
             "success": self.success,
             "response": self.response,
             "route": self.route,
@@ -403,4 +607,13 @@ class QueryResult:
             "quality_score": self.quality_score,
             "latency_ms": self.latency_ms,
             "trace": self.trace.to_dict() if self.trace else None,
+            "token_usage": self.token_usage.to_dict(),
+            "model_used": self.model_used,
+            "guardrails_active": self.guardrails_active,
+            "guardrails_bypassed": self.guardrails_bypassed,
         }
+        if self.pagination:
+            result["pagination"] = self.pagination.to_dict()
+        if self.results:
+            result["results"] = self.results
+        return result

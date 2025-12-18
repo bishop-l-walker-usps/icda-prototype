@@ -1,12 +1,14 @@
-import React from 'react';
-import { Box, Typography, Card, CardContent, Chip, Stack } from '@mui/material';
+import React, { useState } from 'react';
+import { Box, Typography, Card, CardContent, Chip, Stack, IconButton, Tooltip } from '@mui/material';
 import {
   Cloud as CloudIcon, Storage as StorageIcon, Memory as MemoryIcon, Search as SearchIcon,
   CheckCircle as CheckIcon, Cancel as CancelIcon, HourglassEmpty as LoadingIcon,
+  LibraryBooks as KnowledgeIcon,
 } from '@mui/icons-material';
 import { colors } from '../theme';
 import { getStatusColor, getStatusBgColor, type Status } from '../utils';
 import type { HealthStatus } from '../types';
+import { KnowledgeUploadModal } from './KnowledgeUploadModal';
 
 interface AWSToolingPanelProps {
   health: HealthStatus | null;
@@ -27,44 +29,70 @@ const StatusIcon: React.FC<{ status: Status }> = ({ status }) => {
   return <Icon sx={{ color: getStatusColor(status), fontSize: 16 }} />;
 };
 
-export const AWSToolingPanel: React.FC<AWSToolingPanelProps> = ({ health, loading }) => (
-  <Box sx={{ p: 2 }}>
-    <Typography variant="h6" sx={{ mb: 2, color: colors.aws.orange }}>AWS Tooling</Typography>
-    <Stack spacing={1.5}>
-      {SERVICES.map(({ name, desc, icon, key }) => {
-        const status: Status = loading ? 'loading' : !health ? 'offline' : health[key] ? 'online' : 'offline';
-        return (
-          <Card key={name} sx={{ backgroundColor: 'background.elevated', border: 1, borderColor: getStatusBgColor(status, '44') }}>
-            <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                  <Box sx={{ color: colors.aws.orange }}>{icon}</Box>
-                  <Box>
-                    <Typography variant="body2" fontWeight={600}>{name}</Typography>
-                    <Typography variant="caption" color="text.secondary">{desc}</Typography>
+export const AWSToolingPanel: React.FC<AWSToolingPanelProps> = ({ health, loading }) => {
+  const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
+
+  return (
+    <Box sx={{ p: 2 }}>
+      <Typography variant="h6" sx={{ mb: 2, color: colors.aws.orange }}>AWS Tooling</Typography>
+      <Stack spacing={1.5}>
+        {SERVICES.map(({ name, desc, icon, key }) => {
+          const status: Status = loading ? 'loading' : !health ? 'offline' : health[key] ? 'online' : 'offline';
+          const isOpenSearch = key === 'opensearch';
+          return (
+            <Card key={name} sx={{ backgroundColor: 'background.elevated', border: 1, borderColor: getStatusBgColor(status, '44') }}>
+              <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                    <Box sx={{ color: colors.aws.orange }}>{icon}</Box>
+                    <Box>
+                      <Typography variant="body2" fontWeight={600}>{name}</Typography>
+                      <Typography variant="caption" color="text.secondary">{desc}</Typography>
+                    </Box>
+                  </Box>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    {isOpenSearch && (
+                      <Tooltip title="Knowledge Base">
+                        <IconButton
+                          size="small"
+                          onClick={() => setKnowledgeModalOpen(true)}
+                          sx={{
+                            color: colors.accent.main,
+                            '&:hover': { backgroundColor: `${colors.accent.main}22` },
+                          }}
+                        >
+                          <KnowledgeIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                    <Chip
+                      icon={<StatusIcon status={status} />}
+                      label={status}
+                      size="small"
+                      role="status"
+                      aria-label={`${name} status: ${status}`}
+                      sx={{
+                        backgroundColor: getStatusBgColor(status),
+                        color: getStatusColor(status),
+                        textTransform: 'capitalize',
+                        fontSize: '0.7rem',
+                        height: 24,
+                      }}
+                    />
                   </Box>
                 </Box>
-                <Chip
-                  icon={<StatusIcon status={status} />}
-                  label={status}
-                  size="small"
-                  role="status"
-                  aria-label={`${name} status: ${status}`}
-                  sx={{
-                    backgroundColor: getStatusBgColor(status),
-                    color: getStatusColor(status),
-                    textTransform: 'capitalize',
-                    fontSize: '0.7rem',
-                    height: 24,
-                  }}
-                />
-              </Box>
-            </CardContent>
-          </Card>
-        );
-      })}
-    </Stack>
-  </Box>
-);
+              </CardContent>
+            </Card>
+          );
+        })}
+      </Stack>
+
+      <KnowledgeUploadModal
+        open={knowledgeModalOpen}
+        onClose={() => setKnowledgeModalOpen(false)}
+      />
+    </Box>
+  );
+};
 
 export default AWSToolingPanel;

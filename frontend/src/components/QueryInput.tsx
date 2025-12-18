@@ -4,18 +4,19 @@ import {
   Box, TextField, IconButton, Tooltip, FormControlLabel, Switch,
   Button, Chip, Menu, MenuItem, ListItemIcon, ListItemText,
   Paper, List, ListItem, ListItemButton, Typography,
-  InputAdornment, CircularProgress,
+  InputAdornment, CircularProgress, Snackbar, Alert,
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import {
   Send as SendIcon, Clear as ClearIcon, Add as AddIcon, UploadFile as UploadIcon,
   Close as CloseIcon, Download as DownloadIcon, DataObject as JsonIcon, TableChart as CsvIcon,
-  LocationOn as LocationIcon, Search as SearchIcon,
+  LocationOn as LocationIcon, Search as SearchIcon, VerifiedUser as ValidatorIcon,
 } from '@mui/icons-material';
 import { colors, borderRadius, transitions } from '../theme';
 import { downloadMessages, ALLOWED_FILE_EXTENSIONS } from '../utils';
 import api from '../services/api';
 import type { ChatMessage, AutocompleteItem } from '../types';
+import Validator from './Validator';
 
 interface QueryInputProps {
   onSend: (query: string, file?: File) => Promise<void>;
@@ -33,9 +34,11 @@ export const QueryInput: React.FC<QueryInputProps> = ({
   const [query, setQuery] = useState(initialQuery || '');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [downloadAnchor, setDownloadAnchor] = useState<HTMLElement | null>(null);
+  const [validatorOpen, setValidatorOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<AutocompleteItem[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -130,7 +133,7 @@ export const QueryInput: React.FC<QueryInputProps> = ({
       if (ALLOWED_FILE_EXTENSIONS.includes(ext as typeof ALLOWED_FILE_EXTENSIONS[number])) {
         setSelectedFile(file);
       } else {
-        alert(`Only ${ALLOWED_FILE_EXTENSIONS.join(', ')} files supported`);
+        setFileError(`Only ${ALLOWED_FILE_EXTENSIONS.join(', ')} files are supported`);
       }
     }
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -385,6 +388,27 @@ export const QueryInput: React.FC<QueryInputProps> = ({
             </Button>
           </Tooltip>
 
+          <Tooltip title="Validate addresses">
+            <Button
+              size="small"
+              startIcon={<ValidatorIcon />}
+              onClick={() => setValidatorOpen(true)}
+              disabled={loading}
+              aria-label="Validator"
+              sx={{
+                color: colors.success.light,
+                borderColor: alpha(colors.success.main, 0.5),
+                border: 1,
+                '&:hover': {
+                  backgroundColor: alpha(colors.success.main, 0.1),
+                  borderColor: colors.success.main,
+                },
+              }}
+            >
+              Validator
+            </Button>
+          </Tooltip>
+
           {messages.length > 0 && (
             <>
               <Tooltip title="Download chat results">
@@ -455,6 +479,24 @@ export const QueryInput: React.FC<QueryInputProps> = ({
           New Chat
         </Button>
       </Box>
+
+      <Validator open={validatorOpen} onClose={() => setValidatorOpen(false)} />
+
+      <Snackbar
+        open={fileError !== null}
+        autoHideDuration={5000}
+        onClose={() => setFileError(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setFileError(null)}
+          severity="error"
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {fileError}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

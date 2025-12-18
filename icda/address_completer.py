@@ -27,24 +27,24 @@ class NovaAddressCompleter:
     Falls back to fuzzy matching if AWS credentials are not available.
     """
 
-    _SYSTEM_PROMPT = """You are an address completion assistant. Your task is to analyze partial or incomplete US addresses and determine the most likely complete address.
+    _SYSTEM_PROMPT = """You are an address verification assistant. Your task is to determine if a partial address matches any REAL address from the provided candidates.
 
 Given:
 1. A partial address input
-2. A list of candidate addresses from the same ZIP code or area
+2. A list of REAL candidate addresses from our database
 3. Context clues (street number, partial street name, city, state, ZIP)
 
 Your job:
-- Identify which candidate address best matches the input
-- Consider typos, abbreviations, and partial names
-- Return the completed address in structured JSON format
+- ONLY match against the provided candidate addresses - do NOT invent addresses
+- If the input matches a candidate (considering typos, abbreviations), return that exact candidate
+- If NO candidate is a good match, set matched=false and confidence=0
 
-Rules:
-- Only suggest addresses from the provided candidates
-- If no candidate is a good match, indicate low confidence
-- Consider common typos (turkey -> Turkey Run, oak -> Oakland, etc.)
-- Match street numbers exactly when provided
-- ZIP code is a strong anchor - prioritize matches within the same ZIP"""
+CRITICAL RULES:
+- NEVER invent or fabricate an address that isn't in the candidates list
+- If matched=true, the completed_address MUST be copied exactly from a candidate
+- Street numbers must match exactly (101 cannot match 102)
+- If uncertain, set matched=false - it's better to reject than accept a bad match
+- Confidence should be 0.9+ only for very clear matches"""
 
     _COMPLETION_PROMPT = """Analyze this partial address and find the best match:
 
@@ -332,40 +332,72 @@ Respond with JSON:
         parsed: ParsedAddress,
         fuzzy_matches: list[MatchResult],
     ) -> VerificationResult:
-        """Fallback completion when Nova is unavailable."""
+        """Fallback completion when Nova is unavailable.
+
+        Uses STRICT thresholds - we only mark as verified/corrected
+        if we have high confidence the address is real.
+        """
         if not fuzzy_matches:
             return VerificationResult(
                 status=VerificationStatus.UNVERIFIED,
                 original=parsed,
                 confidence=0.0,
-                metadata={"reason": "No candidates available", "fallback": True},
+                metadata={
+                    "reason": "No matching addresses found in database",
+                    "fallback": True,
+                    "suggestion": "Try providing more details (street number, ZIP code)",
+                },
             )
 
         best = fuzzy_matches[0]
 
+        # STRICT thresholds - only accept very high confidence matches
         if best.score >= 0.95:
+            # Near-perfect match - this is a real address
             status = VerificationStatus.VERIFIED
-        elif best.score >= 0.8:
+        elif best.score >= 0.85:
+            # High confidence - likely a real address with minor typos
             status = VerificationStatus.CORRECTED
-        elif best.score >= 0.6:
+        elif best.score >= 0.75:
+            # Moderate confidence - suggest but mark as unconfirmed
             status = VerificationStatus.SUGGESTED
         else:
+            # Below threshold - mark as unverified
+            # Still show alternatives so user can pick
             status = VerificationStatus.UNVERIFIED
 
         alternatives = [m.address.parsed for m in fuzzy_matches[1:4]]
 
+        # For unverified, don't claim we "verified" anything
+        verified_addr = best.address.parsed if status != VerificationStatus.UNVERIFIED else None
+
         return VerificationResult(
             status=status,
             original=parsed,
-            verified=best.address.parsed,
+            verified=verified_addr,
             confidence=best.score,
             match_type=best.match_type,
             alternatives=alternatives,
             metadata={
                 "customer_id": best.customer_id,
                 "fallback": True,
+                "best_match": best.address.parsed.single_line if best.score >= 0.5 else None,
+                "reason": self._get_match_reason(best.score),
             },
         )
+
+    def _get_match_reason(self, score: float) -> str:
+        """Get human-readable reason for match status."""
+        if score >= 0.95:
+            return "Exact match found in database"
+        elif score >= 0.85:
+            return "High-confidence match (possible typo correction)"
+        elif score >= 0.75:
+            return "Moderate match - review suggested address"
+        elif score >= 0.5:
+            return "Low confidence - similar addresses found but no strong match"
+        else:
+            return "No matching address found in database"
 
     def _extract_json(self, text: str) -> dict[str, Any] | None:
         """Extract JSON from Nova response text."""

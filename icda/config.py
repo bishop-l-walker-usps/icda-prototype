@@ -35,6 +35,24 @@ class Config:
     titan_embed_model: str = field(default_factory=lambda: getenv("TITAN_EMBED_MODEL", "amazon.titan-embed-text-v2:0"))
     embed_dimensions: int = 1024
 
+    # ==================== Nova Model Routing (NEW) ====================
+    # Nova Lite - for medium complexity queries
+    nova_lite_model: str = field(default_factory=lambda: getenv("NOVA_LITE_MODEL", "us.amazon.nova-lite-v1:0"))
+    # Nova Pro - for complex queries, low confidence, multi-part queries
+    nova_pro_model: str = field(default_factory=lambda: getenv("NOVA_PRO_MODEL", "us.amazon.nova-pro-v1:0"))
+    # Confidence threshold - below this triggers escalation to Pro
+    model_routing_threshold: float = field(
+        default_factory=lambda: _parse_float(getenv("MODEL_ROUTING_THRESHOLD", ""), 0.6)
+    )
+    # Pagination threshold - above this suggests download
+    pagination_threshold: int = field(
+        default_factory=lambda: _parse_int(getenv("PAGINATION_THRESHOLD", ""), 50)
+    )
+    # Preview size for paginated results
+    pagination_preview_size: int = field(
+        default_factory=lambda: _parse_int(getenv("PAGINATION_PREVIEW_SIZE", ""), 15)
+    )
+
     # ==================== Cache (optional - empty = in-memory fallback) ====================
     cache_ttl: int = 43200  # 12 hours
     redis_url: str = field(default_factory=lambda: getenv("REDIS_URL", ""))

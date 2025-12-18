@@ -10,7 +10,8 @@
 #   - icda:       Main application (FastAPI backend + React frontend)
 #   - redis:      Cache layer (required)
 #   - opensearch: Vector search and RAG (required)
-#   - mcp-*:      Optional MCP servers (use --profile mcp)
+#   - mcp-knowledge: Knowledge RAG server (starts by default)
+#   - mcp-server: Claude CLI MCP server (use --profile mcp)
 # ============================================
 
 services:
@@ -163,7 +164,7 @@ services:
   # ============================================
   mcp-server:
     build:
-      context: .github/mcp-servers/unified-dev
+      context: .claude/mcp-servers/unified-dev
       dockerfile: Dockerfile.unified
     image: icda-mcp:latest
     container_name: icda-mcp
@@ -194,7 +195,7 @@ services:
 
   # ============================================
   # MCP Knowledge Server (RAG for internal docs)
-  # Start with: docker-compose --profile mcp up -d mcp-knowledge
+  # Indexes knowledge/ directory for RAG search
   # ============================================
   mcp-knowledge:
     build:
@@ -230,8 +231,6 @@ services:
     restart: unless-stopped
     networks:
       - icda-network
-    profiles:
-      - mcp
 
 # ============================================
 # Networks

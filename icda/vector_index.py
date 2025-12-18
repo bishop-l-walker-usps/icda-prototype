@@ -323,3 +323,84 @@ class VectorIndex:
             return {"success": True, "query": query, "count": len(results), "data": results}
         except Exception as e:
             return {"success": False, "error": str(e), "count": 0, "data": []}
+
+    async def delete_customer_index(self) -> bool:
+        """Delete the customer index."""
+        if not self.available:
+            return False
+        try:
+            if await self.client.indices.exists(index=self.customer_index):
+                await self.client.indices.delete(index=self.customer_index)
+            return True
+        except Exception:
+            return False
+
+    async def index_customers(self, customers: list[dict], batch_size: int = 50, progress_callback: Callable = None) -> dict:
+        """Index customers into OpenSearch with embeddings."""
+        if not self.available:
+            return {"indexed": 0, "errors": 0, "error": "OpenSearch not available"}
+
+        await self.ensure_customer_index()
+
+        indexed = 0
+        errors = 0
+        total = len(customers)
+
+        for i in range(0, total, batch_size):
+            batch = customers[i:i + batch_size]
+            actions = []
+
+            for customer in batch:
+                # Build search text for embedding
+                search_text = f"{customer.get('name', '')} {customer.get('address', '')} {customer.get('city', '')} {customer.get('state', '')} {customer.get('zip', '')}"
+
+                doc = {
+                    "crid": customer.get("crid", ""),
+                    "name": customer.get("name", ""),
+                    "address": customer.get("address", ""),
+                    "city": customer.get("city", ""),
+                    "state": customer.get("state", ""),
+                    "zip": customer.get("zip", ""),
+                    "customer_type": customer.get("customer_type", "RESIDENTIAL"),
+                    "status": customer.get("status", "ACTIVE"),
+                    "move_count": customer.get("move_count", 0),
+                    "last_move": customer.get("last_move_date") or "1970-01-01",
+                    "created_date": customer.get("created_date", "2020-01-01"),
+                    "search_text": search_text,
+                }
+
+                # Generate embedding if available
+                if self.embedder and self.embedder.available:
+                    embedding = self.embedder.embed(search_text)
+                    if embedding:
+                        doc["embedding"] = embedding
+
+                actions.append({"index": {"_index": self.customer_index, "_id": customer.get("crid", "")}})
+                actions.append(doc)
+
+            # Bulk index
+            try:
+                if actions:
+                    response = await self.client.bulk(body=actions, refresh=False)
+                    if response.get("errors"):
+                        for item in response["items"]:
+                            if "error" in item.get("index", {}):
+                                errors += 1
+                            else:
+                                indexed += 1
+                    else:
+                        indexed += len(batch)
+            except Exception as e:
+                print(f"Batch error: {e}")
+                errors += len(batch)
+
+            if progress_callback:
+                progress_callback(indexed + errors, total)
+
+        # Final refresh
+        try:
+            await self.client.indices.refresh(index=self.customer_index)
+        except Exception:
+            pass
+
+        return {"indexed": indexed, "errors": errors}

@@ -32,6 +32,7 @@ from icda.router import Router
 from icda.session import SessionManager
 from icda.knowledge import KnowledgeManager
 from icda.knowledge_watcher import KnowledgeWatcher
+from icda.download_tokens import DownloadTokenManager
 
 # Gemini Enforcer imports
 from icda.gemini import GeminiEnforcer, GeminiConfig
@@ -74,6 +75,9 @@ _orchestrator: AddressAgentOrchestrator = None
 
 # Gemini Enforcer global
 _enforcer: GeminiEnforcer = None
+
+# Download Token Manager global
+_download_manager: DownloadTokenManager = None
 
 
 def _extract_tags_from_content(content: str, filepath: Path) -> list[str]:
@@ -170,7 +174,7 @@ async def lifespan(app: FastAPI):
     global _cache, _embedder, _vector_index, _db, _nova, _sessions, _router, _knowledge, _knowledge_watcher
     global _address_index, _address_completer, _address_pipeline
     global _zip_database, _address_vector_index, _orchestrator
-    global _enforcer
+    global _enforcer, _download_manager
 
     print("\n" + "="*50)
     print("  ICDA Startup")
@@ -179,6 +183,9 @@ async def lifespan(app: FastAPI):
     # Startup - Redis is REQUIRED
     _cache = RedisCache(cfg.cache_ttl)
     await _cache.connect(cfg.redis_url)
+    # Clear stale cache entries on startup to ensure fresh responses
+    await _cache.clear()
+    print("  Cache cleared on startup (removing stale entries)")
     if not _cache.available:
         print("\n[FATAL] Redis is REQUIRED but not available!")
         print("        Start Redis with: docker-compose up -d redis")
@@ -198,6 +205,10 @@ async def lifespan(app: FastAPI):
     print(f"Customer database: {len(_db.customers)} customers loaded")
 
     _sessions = SessionManager(_cache)
+
+    # Initialize download token manager
+    _download_manager = DownloadTokenManager(_cache)
+    print(f"Download token manager: threshold={_download_manager.pagination_threshold}, preview={_download_manager.preview_size}")
 
     # Initialize address verification
     print("\nInitializing address verification...")
@@ -268,30 +279,8 @@ async def lifespan(app: FastAPI):
     _knowledge_watcher = KnowledgeWatcher(KNOWLEDGE_DIR, index_file_callback)
     _knowledge_watcher.start()
 
-    # Initialize NovaClient with full 8-agent pipeline including knowledge RAG
-    print("\nInitializing AI query pipeline...")
-    _nova = NovaClient(
-        region=cfg.aws_region,
-        model=cfg.nova_model,
-        db=_db,
-        vector_index=_vector_index,
-        knowledge=_knowledge,  # Pass knowledge manager for RAG
-        address_orchestrator=_orchestrator,
-        session_store=_sessions,
-        use_orchestrator=True,  # Enable 8-agent pipeline
-    )
-    if _nova.available:
-        if _nova.orchestrator:
-            print(f"  Nova AI: enabled with 8-agent orchestrator")
-            print(f"    - KnowledgeAgent: {'enabled' if _nova.orchestrator._knowledge_agent.available else 'disabled'}")
-        else:
-            print(f"  Nova AI: enabled (simple mode)")
-    else:
-        print("  Nova AI: disabled (no AWS credentials)")
-
-    _router = Router(_cache, _vector_index, _db, _nova, _sessions)
-
-    # Initialize Gemini Enforcer (optional, graceful degradation if no API key)
+    # Initialize Gemini Enforcer FIRST (optional, graceful degradation if no API key)
+    # This must be done before NovaClient so it can be passed to the orchestrator
     print("\nInitializing Gemini Enforcer...")
     gemini_config = GeminiConfig(
         api_key=cfg.gemini_api_key,
@@ -310,6 +299,31 @@ async def lifespan(app: FastAPI):
         print(f"  - L3 Query Review: {int(cfg.gemini_query_sample_rate * 100)}% sample")
     else:
         print("  Enforcer: disabled (no GEMINI_API_KEY)")
+
+    # Initialize NovaClient with 7-agent pipeline + Gemini enforcer
+    print("\nInitializing AI query pipeline...")
+    _nova = NovaClient(
+        region=cfg.aws_region,
+        model=cfg.nova_model,
+        db=_db,
+        vector_index=_vector_index,
+        knowledge=_knowledge,  # Pass knowledge manager for RAG
+        address_orchestrator=_orchestrator,
+        session_store=_sessions,
+        gemini_enforcer=_enforcer,  # Pass Gemini enforcer for quality validation
+        use_orchestrator=True,  # Enable 7-agent pipeline
+    )
+    if _nova.available:
+        if _nova.orchestrator:
+            gemini_status = " + Gemini enforcer" if _enforcer.available else ""
+            print(f"  Nova AI: enabled with 7-agent orchestrator{gemini_status}")
+            print(f"    - KnowledgeAgent: {'enabled' if _nova.orchestrator._knowledge_agent.available else 'disabled'}")
+        else:
+            print(f"  Nova AI: enabled (simple mode)")
+    else:
+        print("  Nova AI: disabled (no AWS credentials)")
+
+    _router = Router(_cache, _vector_index, _db, _nova, _sessions)
 
     # Print mode summary
     mode = "FULL" if _nova.available and _embedder.available else "LITE"
@@ -347,9 +361,20 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    """Sanitized global exception handler - never exposes internal details."""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+
     return JSONResponse(
         status_code=500,
-        content={"error": str(exc)},
+        content={
+            "success": False,
+            "error": {
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": "An unexpected error occurred. Please try again later."
+            }
+        },
         headers={"Access-Control-Allow-Origin": "*"}
     )
 
@@ -371,6 +396,56 @@ class QueryRequest(BaseModel):
 async def query(req: QueryRequest):
     guards = req.guardrails.model_dump() if req.guardrails else None
     return await _router.route(req.query, req.bypass_cache, guards)
+
+
+@app.get("/api/query/download/{token}")
+async def download_results(token: str, format: str = "json"):
+    """Download full results using download token.
+
+    Args:
+        token: Download token from paginated query response.
+        format: Output format ('json' or 'csv').
+
+    Returns:
+        Full result set in requested format.
+    """
+    if not _download_manager:
+        return {"success": False, "error": "Download manager not available"}
+
+    result = await _download_manager.get_full_results_async(token)
+    if not result:
+        return {"success": False, "error": "Invalid or expired download token"}
+
+    if format == "csv":
+        import csv
+        import io
+        from fastapi.responses import StreamingResponse
+
+        data = result["data"]
+        if not data:
+            return {"success": False, "error": "No data to download"}
+
+        output = io.StringIO()
+        if data:
+            # Get all unique keys from all records
+            all_keys = set()
+            for record in data:
+                all_keys.update(record.keys())
+            fieldnames = sorted(all_keys)
+
+            writer = csv.DictWriter(output, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(data)
+
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=icda_results_{token[:8]}.csv"}
+        )
+
+    # Default: JSON format
+    return result
 
 
 @app.get("/api/health")
@@ -1158,18 +1233,36 @@ async def admin_validate_index():
 
 # ==================== Frontend ====================
 
+frontend_dist = BASE_DIR / "frontend" / "dist"
+frontend_index = frontend_dist / "index.html"
+
+# Mount static assets BEFORE catch-all routes
+if frontend_dist.exists() and (frontend_dist / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    frontend_index = BASE_DIR / "frontend" / "dist" / "index.html"
     if frontend_index.exists():
         return frontend_index.read_text()
     return (BASE_DIR / "templates/index.html").read_text()
 
 
-frontend_dist = BASE_DIR / "frontend" / "dist"
-if frontend_dist.exists():
-    app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
+# SPA catch-all route - serves index.html for client-side routing (admin, etc.)
+async def _serve_spa():
+    if frontend_index.exists():
+        return HTMLResponse(frontend_index.read_text())
+    return HTMLResponse((BASE_DIR / "templates/index.html").read_text())
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def spa_admin_root():
+    return await _serve_spa()
+
+
+@app.get("/admin/{path:path}", response_class=HTMLResponse)
+async def spa_admin_path(path: str):
+    return await _serve_spa()
 
 
 if __name__ == "__main__":

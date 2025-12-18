@@ -7,6 +7,7 @@ import type {
   CacheStats,
   AddressVerificationRequest,
   AddressVerificationResponse,
+  SingleAddressVerificationResponse,
   FileQueryRequest,
   AutocompleteResult,
   SemanticSearchResult,
@@ -15,6 +16,15 @@ import type {
   KnowledgeUploadResult,
   KnowledgeSearchResult,
 } from '../types';
+
+// Download result response type
+export interface DownloadResult {
+  success: boolean;
+  query: string;
+  total: number;
+  data: Record<string, unknown>[];
+  generated_at: string;
+}
 
 // API base URL - configurable via environment variable
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -28,9 +38,67 @@ const apiClient: AxiosInstance = axios.create({
   },
 });
 
-// Request/Response interceptors
-apiClient.interceptors.request.use((config) => config, (error) => Promise.reject(error));
-apiClient.interceptors.response.use((response) => response, (error) => Promise.reject(error));
+// Request interceptor - adds request timing
+apiClient.interceptors.request.use(
+  (config) => {
+    // Add timestamp for latency tracking (using headers for compatibility)
+    config.headers.set('X-Request-Start', Date.now().toString());
+    return config;
+  },
+  (error) => {
+    console.error('Request error:', error);
+    return Promise.reject(error);
+  }
+);
+
+// Response interceptor - handles errors consistently
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Log error details for debugging
+    if (error.response) {
+      // Server responded with error status
+      console.error(`API Error [${error.response.status}]:`, error.response.data);
+    } else if (error.request) {
+      // Request made but no response received
+      console.error('Network error - no response received:', error.message);
+    } else {
+      // Error in request setup
+      console.error('Request setup error:', error.message);
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Helper function to convert JSON data to CSV format
+function convertToCSV(data: Record<string, unknown>[]): string {
+  if (data.length === 0) return '';
+
+  // Get all unique headers from all records
+  const headers = new Set<string>();
+  data.forEach((record) => {
+    Object.keys(record).forEach((key) => headers.add(key));
+  });
+  const headerArray = Array.from(headers);
+
+  // Create CSV rows
+  const rows = data.map((record) =>
+    headerArray
+      .map((header) => {
+        const value = record[header];
+        if (value === null || value === undefined) return '';
+        const stringValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+        // Escape quotes and wrap in quotes if contains comma, newline, or quote
+        if (stringValue.includes(',') || stringValue.includes('\n') || stringValue.includes('"')) {
+          return `"${stringValue.replace(/"/g, '""')}"`;
+        }
+        return stringValue;
+      })
+      .join(',')
+  );
+
+  return [headerArray.join(','), ...rows].join('\n');
+}
 
 // API Functions
 export const api = {
@@ -176,6 +244,18 @@ export const api = {
     return response.data;
   },
 
+  // Single address verification endpoint
+  verifySingleAddress: async (
+    address: string,
+    context?: Record<string, string>
+  ): Promise<SingleAddressVerificationResponse> => {
+    const response = await apiClient.post<SingleAddressVerificationResponse>(
+      '/api/address/verify',
+      { address, context: context || {} }
+    );
+    return response.data;
+  },
+
   // Street name suggestions for address completion
   suggestStreet: async (
     partial: string,
@@ -249,6 +329,52 @@ export const api = {
       { query, ...options }
     );
     return response.data;
+  },
+
+  // Download results by token (for paginated large datasets)
+  downloadResults: async (
+    token: string,
+    format: 'json' | 'csv' = 'json'
+  ): Promise<DownloadResult | Blob> => {
+    if (format === 'csv') {
+      const response = await apiClient.get(`/api/query/download/${token}`, {
+        params: { format: 'csv' },
+        responseType: 'blob',
+        timeout: 60000,
+      });
+      return response.data;
+    }
+    const response = await apiClient.get<DownloadResult>(
+      `/api/query/download/${token}`,
+      {
+        params: { format: 'json' },
+        timeout: 60000,
+      }
+    );
+    return response.data;
+  },
+
+  // Helper to trigger file download in browser
+  triggerDownload: (data: Blob | DownloadResult, filename: string, format: 'json' | 'csv') => {
+    let blob: Blob;
+    if (data instanceof Blob) {
+      blob = data;
+    } else {
+      const content = format === 'csv'
+        ? convertToCSV(data.data)
+        : JSON.stringify(data, null, 2);
+      blob = new Blob([content], {
+        type: format === 'csv' ? 'text/csv' : 'application/json',
+      });
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${filename}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   },
 };
 

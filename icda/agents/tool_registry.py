@@ -262,13 +262,15 @@ def create_default_registry(db, vector_index=None, knowledge=None, address_orche
 
     registry.register(ToolSpec(
         name="search_customers",
-        description="Search for customers with flexible filters. Use when user asks about customers in a state/city, customers who moved, or general customer searches. Interpret informal language: 'Nevada folks'=state NV, 'high movers'=min_move_count 3+.",
+        description="Search and COUNT customers with filters. USE THIS for filtered queries like 'customers in CA', 'apartment renters', 'how many residential'. Returns matching customers with total count.",
         input_schema={
             "type": "object",
             "properties": {
                 "state": {"type": "string", "description": "Two-letter state code (NV, CA, TX, etc)"},
                 "city": {"type": "string", "description": "City name to filter by"},
                 "min_move_count": {"type": "integer", "description": "Minimum number of moves"},
+                "customer_type": {"type": "string", "description": "RESIDENTIAL, BUSINESS, or PO_BOX"},
+                "has_apartment": {"type": "boolean", "description": "True to filter for Apt/Unit addresses"},
                 "limit": {"type": "integer", "description": "Max results (default 10, max 100)"}
             }
         },
@@ -279,6 +281,8 @@ def create_default_registry(db, vector_index=None, knowledge=None, address_orche
             state=p.get("state"),
             city=p.get("city"),
             min_moves=p.get("min_move_count"),
+            customer_type=p.get("customer_type"),
+            has_apartment=p.get("has_apartment"),
             limit=p.get("limit")
         )
     ))

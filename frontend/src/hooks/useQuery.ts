@@ -1,6 +1,6 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import type { GuardrailFlags, ChatMessage, QueryResponse } from '../types';
+import type { GuardrailFlags, ChatMessage, EnhancedQueryResponse, EnhancedChatMetadata } from '../types';
 import api from '../services/api';
 
 export interface UseQueryReturn {
@@ -11,6 +11,7 @@ export interface UseQueryReturn {
   clearMessages: () => void;
   newSession: () => void;
   addSystemMessage: (content: string, type: 'bot' | 'error' | 'blocked') => void;
+  downloadResults: (token: string, format: 'json' | 'csv') => Promise<void>;
 }
 
 export function useQuery(): UseQueryReturn {
@@ -18,6 +19,16 @@ export function useQuery(): UseQueryReturn {
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const sessionInitialized = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const addMessage = useCallback((message: Omit<ChatMessage, 'id' | 'timestamp'>) => {
     const newMessage: ChatMessage = {
@@ -31,6 +42,12 @@ export function useQuery(): UseQueryReturn {
 
   const sendQuery = useCallback(
     async (query: string, guardrails: GuardrailFlags, bypassCache: boolean = false, file?: File) => {
+      // Cancel any previous request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      abortControllerRef.current = new AbortController();
+
       // Initialize session on first query if not already set
       let currentSessionId = sessionId;
       if (!currentSessionId && !sessionInitialized.current) {
@@ -50,7 +67,7 @@ export function useQuery(): UseQueryReturn {
 
       try {
         // Use file upload endpoint if file is provided, otherwise use regular query
-        const response: QueryResponse = file
+        const response = (file
           ? await api.queryWithFile({
               query,
               file,
@@ -63,7 +80,7 @@ export function useQuery(): UseQueryReturn {
               bypass_cache: bypassCache,
               guardrails,
               session_id: currentSessionId ?? undefined,
-            });
+            })) as EnhancedQueryResponse;
 
         // Update session ID from response if provided
         if (response.session_id && response.session_id !== currentSessionId) {
@@ -71,12 +88,30 @@ export function useQuery(): UseQueryReturn {
           sessionInitialized.current = true;
         }
 
+        // Build enhanced metadata from response
+        const buildMetadata = (): EnhancedChatMetadata => ({
+          route: response.route,
+          latency_ms: response.latency_ms,
+          cached: response.cached,
+          tool: response.tool,
+          token_usage: response.token_usage,
+          trace: response.trace,
+          pagination: response.pagination,
+          model_used: response.model_used,
+          quality_score: response.quality_score,
+          guardrails_active: response.guardrails_active,
+          guardrails_bypassed: response.guardrails_bypassed,
+          results: response.results,
+        });
+
         if (response.blocked) {
           addMessage({
             type: 'blocked',
             content: response.response,
             metadata: {
               latency_ms: response.latency_ms,
+              guardrails_active: response.guardrails_active,
+              guardrails_bypassed: response.guardrails_bypassed,
             },
           });
         } else if (!response.success) {
@@ -85,21 +120,21 @@ export function useQuery(): UseQueryReturn {
             content: response.response || 'An error occurred',
             metadata: {
               latency_ms: response.latency_ms,
+              trace: response.trace,
             },
           });
         } else {
           addMessage({
             type: 'bot',
             content: response.response,
-            metadata: {
-              route: response.route,
-              latency_ms: response.latency_ms,
-              cached: response.cached,
-              tool: response.tool,
-            },
+            metadata: buildMetadata(),
           });
         }
       } catch (err) {
+        // Ignore abort errors - they're expected when cancelling requests
+        if (err instanceof Error && err.name === 'AbortError') {
+          return;
+        }
         const errorMessage = err instanceof Error ? err.message : 'Failed to send query';
         addMessage({
           type: 'error',
@@ -115,7 +150,9 @@ export function useQuery(): UseQueryReturn {
   const clearMessages = useCallback(() => {
     setMessages([]);
     if (sessionId) {
-      api.deleteSession(sessionId).catch(() => {});
+      api.deleteSession(sessionId).catch((err) => {
+        console.warn('Failed to delete session:', err);
+      });
     }
     setSessionId(null);
     sessionInitialized.current = false;
@@ -123,7 +160,9 @@ export function useQuery(): UseQueryReturn {
 
   const newSession = useCallback(() => {
     if (sessionId) {
-      api.deleteSession(sessionId).catch(() => {});
+      api.deleteSession(sessionId).catch((err) => {
+        console.warn('Failed to delete previous session:', err);
+      });
     }
     setSessionId(uuidv4());
     sessionInitialized.current = true;
@@ -134,6 +173,19 @@ export function useQuery(): UseQueryReturn {
     addMessage({ type, content });
   }, [addMessage]);
 
+  const downloadResults = useCallback(async (token: string, format: 'json' | 'csv') => {
+    try {
+      const data = await api.downloadResults(token, format);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `icda-results-${timestamp}`;
+      api.triggerDownload(data, filename, format);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to download results';
+      console.error('Download error:', errorMessage);
+      throw err;
+    }
+  }, []);
+
   return {
     messages,
     loading,
@@ -142,6 +194,7 @@ export function useQuery(): UseQueryReturn {
     clearMessages,
     newSession,
     addSystemMessage,
+    downloadResults,
   };
 }
 
