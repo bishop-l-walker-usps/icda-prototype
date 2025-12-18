@@ -193,6 +193,8 @@ class SearchAgent:
             state=filters.get("state"),
             city=filters.get("city"),
             min_moves=filters.get("min_move_count"),
+            customer_type=filters.get("customer_type"),
+            has_apartment=filters.get("has_apartment"),
             limit=parsed.limit * 2,  # Get extra for confidence
         )
 

@@ -171,9 +171,9 @@ If you need to call a tool, select the most appropriate one based on the query."
         """
         messages = []
 
-        # Add relevant history (filter to text-only)
+        # Add relevant history (filter to text-only, limit to save tokens)
         if context.session_history:
-            for msg in context.session_history[-6:]:  # Last 6 messages
+            for msg in context.session_history[-2:]:  # Last 2 messages only
                 role = msg.get("role")
                 content = msg.get("content", [])
 
@@ -211,10 +211,10 @@ If you need to call a tool, select the most appropriate one based on the query."
         # Add search results context - compact format to stay under token limits
         if search_result.results:
             total = search_result.total_matches
-            shown = min(len(search_result.results), 10)  # Limit to 10 results
+            shown = min(len(search_result.results), 5)  # Limit to 5 results to save tokens
             parts.append(f"CUSTOMER DATA ({shown} of {total} total):")
 
-            for i, customer in enumerate(search_result.results[:10], 1):
+            for i, customer in enumerate(search_result.results[:5], 1):
                 crid = customer.get("crid", "N/A")
                 name = customer.get("name", "N/A")
                 city = customer.get("city", "N/A")
@@ -225,8 +225,8 @@ If you need to call a tool, select the most appropriate one based on the query."
                 # Compact single-line format
                 parts.append(f"  {i}. {crid}: {name} - {customer_type}, {city}, {state} ({moves} moves)")
 
-            if total > 10:
-                parts.append(f"  ... and {total - 10} more")
+            if total > 5:
+                parts.append(f"  ... and {total - 5} more")
 
         else:
             parts.append("NO CUSTOMER DATA FOUND - inform the user no matches were found.")
@@ -343,11 +343,11 @@ If you need to call a tool, select the most appropriate one based on the query."
         # Generate response from search results with COMPLETE customer data
         if search_result.results:
             total = search_result.total_matches
-            shown = min(len(search_result.results), 10)
+            shown = min(len(search_result.results), 5)  # Limit to 5 for concise output
 
             # Format results with full customer details
             lines = [f"Found {total} customer(s). Here are the top {shown}:\n"]
-            for i, customer in enumerate(search_result.results[:10], 1):
+            for i, customer in enumerate(search_result.results[:5], 1):
                 crid = customer.get("crid", "N/A")
                 name = customer.get("name", "N/A")
                 address = customer.get("address", "N/A")
@@ -364,8 +364,8 @@ If you need to call a tool, select the most appropriate one based on the query."
                 lines.append(f"   Moves: {moves} | Status: {status} | Type: {customer_type}")
                 lines.append("")
 
-            if total > 10:
-                lines.append(f"... and {total - 10} more customers match your query.")
+            if total > 5:
+                lines.append(f"... and {total - 5} more customers match your query.")
 
             return NovaResponse(
                 response_text="\n".join(lines),
