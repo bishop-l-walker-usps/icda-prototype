@@ -25,8 +25,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy server code
+# Copy server code and packages
 COPY *.py ./
+COPY enforcer/ ./enforcer/
 
 # Create directories with proper permissions
 RUN mkdir -p /app/knowledge /app/data && \
