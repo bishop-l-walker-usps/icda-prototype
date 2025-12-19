@@ -31,8 +31,12 @@ from .models import (
     PipelineStage,
     QueryResult,
     SearchStrategy,
+    TokenUsage,
+    PaginationInfo,
+    ModelRoutingDecision,
 )
 from .tool_registry import ToolRegistry, create_default_registry
+from .model_router import ModelRouter
 from .intent_agent import IntentAgent
 from .context_agent import ContextAgent
 from .parser_agent import ParserAgent
@@ -50,6 +54,12 @@ class QueryOrchestrator:
 
     Coordinates data flow between agents, handles parallel execution,
     and provides comprehensive tracing for debugging.
+
+    Enhanced features:
+    - Model routing (Micro/Lite/Pro) based on complexity and confidence
+    - Token usage tracking across pipeline stages
+    - Pagination for large result sets with download tokens
+    - Confidence tracking for all agents
     """
     __slots__ = (
         "_intent_agent",
@@ -63,6 +73,8 @@ class QueryOrchestrator:
         "_tool_registry",
         "_session_store",
         "_config",
+        "_model_router",
+        "_download_manager",
     )
 
     def __init__(
@@ -77,13 +89,14 @@ class QueryOrchestrator:
         guardrails=None,
         gemini_enforcer=None,
         config: dict[str, Any] | None = None,
+        download_manager=None,
     ):
         """Initialize QueryOrchestrator with all agents.
 
         Args:
             db: CustomerDB instance.
             region: AWS region for Bedrock.
-            model: Bedrock model ID.
+            model: Bedrock model ID (default/micro model).
             vector_index: Optional VectorIndex for semantic search.
             knowledge: Optional KnowledgeManager for RAG.
             address_orchestrator: Optional address verification orchestrator.
@@ -91,9 +104,23 @@ class QueryOrchestrator:
             guardrails: Optional Guardrails for PII filtering.
             gemini_enforcer: Optional GeminiEnforcer for AI-powered validation.
             config: Optional configuration overrides.
+            download_manager: Optional DownloadTokenManager for pagination.
         """
         self._config = config or {}
         self._session_store = session_store
+        self._download_manager = download_manager
+
+        # Create model router with configuration
+        lite_model = self._config.get("nova_lite_model", "us.amazon.nova-lite-v1:0")
+        pro_model = self._config.get("nova_pro_model", "us.amazon.nova-pro-v1:0")
+        threshold = self._config.get("model_routing_threshold", 0.6)
+
+        self._model_router = ModelRouter(
+            micro_model=model,
+            lite_model=lite_model,
+            pro_model=pro_model,
+            confidence_threshold=threshold,
+        )
 
         # Create tool registry with available services
         self._tool_registry = create_default_registry(
@@ -126,6 +153,7 @@ class QueryOrchestrator:
         logger.info(
             f"QueryOrchestrator initialized: {len(self._tool_registry.list_tools())} tools, Gemini enforcer: {gemini_status}"
         )
+        logger.info(f"Model routing: micro={model}, lite={lite_model}, pro={pro_model}, threshold={threshold}")
 
     @property
     def available(self) -> bool:
@@ -207,7 +235,28 @@ class QueryOrchestrator:
                 trace=trace,
             )
 
-            # Stage 7: Nova AI Generation
+            # Collect confidences from all agents for model routing
+            agent_confidences = [
+                intent.confidence,
+                context.context_confidence,
+                resolved.resolution_confidence,
+                search_result.search_confidence,
+                knowledge.rag_confidence,
+            ]
+
+            # Stage 7: Nova AI Generation (with model routing)
+            # Model router decides Micro/Lite/Pro based on complexity and confidence
+            routing_decision = self._model_router.route(
+                intent=intent,
+                parsed=parsed,
+                search_result=search_result,
+                agent_confidences=agent_confidences,
+            )
+
+            # Record routing decision in trace
+            if trace:
+                trace.model_routing_decision = routing_decision
+
             nova_response = await self._run_stage(
                 "nova",
                 lambda: self._nova_agent.generate(
@@ -237,6 +286,9 @@ class QueryOrchestrator:
             if trace:
                 trace.total_time_ms = total_ms
                 trace.success = True
+                # Add token usage to trace from Nova response
+                if nova_response.token_usage:
+                    trace.total_token_usage = nova_response.token_usage
 
             # Store context for follow-up queries
             if session_id and self._session_store:
@@ -246,6 +298,25 @@ class QueryOrchestrator:
                     response=enforced.final_response,
                     intent=intent,
                     search_result=search_result,
+                )
+
+            # Apply pagination if download_manager available
+            pagination = None
+            preview_results = None
+            full_results = search_result.results
+
+            if self._download_manager and search_result.total_matches > 0:
+                preview_results, pagination_dict = self._download_manager.create_download_token(
+                    results=full_results,
+                    query=query,
+                )
+                pagination = PaginationInfo(
+                    total_count=pagination_dict["total_count"],
+                    returned_count=pagination_dict["returned_count"],
+                    has_more=pagination_dict["has_more"],
+                    suggest_download=pagination_dict["suggest_download"],
+                    download_token=pagination_dict.get("download_token"),
+                    preview_size=pagination_dict.get("preview_size", 15),
                 )
 
             return QueryResult(
@@ -262,7 +333,12 @@ class QueryOrchestrator:
                     "status": enforced.status.value,
                     "gates_passed": len(enforced.gates_passed),
                     "gates_failed": len(enforced.gates_failed),
+                    "model_routing": routing_decision.to_dict(),
                 },
+                token_usage=nova_response.token_usage,
+                pagination=pagination,
+                model_used=nova_response.model_used,
+                results=preview_results if preview_results else full_results,
             )
 
         except Exception as e:
@@ -307,12 +383,38 @@ class QueryOrchestrator:
             elapsed_ms = int((time.time() - start) * 1000)
 
             if trace:
-                trace.stages.append(PipelineStage(
+                # Extract confidence from result if available
+                confidence = None
+                token_usage = None
+
+                if hasattr(result, "confidence"):
+                    confidence = result.confidence
+                elif hasattr(result, "ai_confidence"):
+                    confidence = result.ai_confidence
+                elif hasattr(result, "search_confidence"):
+                    confidence = result.search_confidence
+                elif hasattr(result, "rag_confidence"):
+                    confidence = result.rag_confidence
+                elif hasattr(result, "resolution_confidence"):
+                    confidence = result.resolution_confidence
+                elif hasattr(result, "context_confidence"):
+                    confidence = result.context_confidence
+                elif hasattr(result, "quality_score"):
+                    confidence = result.quality_score
+
+                # Extract token usage from Nova stage
+                if hasattr(result, "token_usage") and result.token_usage:
+                    token_usage = result.token_usage
+
+                # Use the add_stage method to track confidence and aggregate tokens
+                trace.add_stage(
                     agent=name,
                     output=result.to_dict() if hasattr(result, "to_dict") else {},
                     time_ms=elapsed_ms,
                     success=True,
-                ))
+                    confidence=confidence,
+                    token_usage=token_usage,
+                )
 
             logger.debug(f"Stage {name} completed in {elapsed_ms}ms")
             return result
@@ -322,13 +424,13 @@ class QueryOrchestrator:
             logger.error(f"Stage {name} failed: {e}")
 
             if trace:
-                trace.stages.append(PipelineStage(
+                trace.add_stage(
                     agent=name,
                     output={},
                     time_ms=elapsed_ms,
                     success=False,
                     error=str(e),
-                ))
+                )
             raise
 
     async def _run_parallel_stages(
@@ -385,22 +487,24 @@ class QueryOrchestrator:
         elapsed_ms = int((time.time() - start) * 1000)
 
         if trace:
-            # Record search stage
-            trace.stages.append(PipelineStage(
+            # Record search stage with confidence
+            trace.add_stage(
                 agent="search",
                 output=search_result.to_dict(),
                 time_ms=elapsed_ms,
                 success=search_error is None,
                 error=search_error,
-            ))
-            # Record knowledge stage
-            trace.stages.append(PipelineStage(
+                confidence=search_result.search_confidence if search_error is None else None,
+            )
+            # Record knowledge stage with confidence
+            trace.add_stage(
                 agent="knowledge",
                 output=knowledge_result.to_dict(),
                 time_ms=elapsed_ms,
                 success=knowledge_error is None,
                 error=knowledge_error,
-            ))
+                confidence=knowledge_result.rag_confidence if knowledge_error is None else None,
+            )
 
         logger.debug(f"Parallel stages completed in {elapsed_ms}ms")
         return search_result, knowledge_result
@@ -503,19 +607,23 @@ def create_query_orchestrator(
     session_store=None,
     guardrails=None,
     gemini_enforcer=None,
+    config: dict[str, Any] | None = None,
+    download_manager=None,
 ) -> QueryOrchestrator:
     """Factory function to create a QueryOrchestrator.
 
     Args:
         db: CustomerDB instance.
         region: AWS region for Bedrock.
-        model: Bedrock model ID.
+        model: Bedrock model ID (default/micro model).
         vector_index: Optional VectorIndex for semantic search.
         knowledge: Optional KnowledgeManager for RAG.
         address_orchestrator: Optional address verification orchestrator.
         session_store: Optional session store for context.
         guardrails: Optional Guardrails for PII filtering.
         gemini_enforcer: Optional GeminiEnforcer for AI-powered validation.
+        config: Optional configuration dict for model routing settings.
+        download_manager: Optional DownloadTokenManager for pagination.
 
     Returns:
         Configured QueryOrchestrator instance.
@@ -530,4 +638,6 @@ def create_query_orchestrator(
         session_store=session_store,
         guardrails=guardrails,
         gemini_enforcer=gemini_enforcer,
+        config=config,
+        download_manager=download_manager,
     )

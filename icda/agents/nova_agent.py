@@ -29,6 +29,8 @@ from .models import (
     SearchResult,
     KnowledgeContext,
     NovaResponse,
+    TokenUsage,
+    ParsedQuery,
 )
 from .tool_registry import ToolRegistry
 
@@ -130,8 +132,8 @@ If you need to call a tool, select the most appropriate one based on the query."
             # Get tools for this intent
             tools = self._tool_registry.get_tools_for_intent(intent)
 
-            # Call Nova
-            response, tools_used, tool_results = await self._converse(
+            # Call Nova - now returns token_usage
+            response, tools_used, tool_results, token_usage = await self._converse(
                 messages, tools, rag_context
             )
 
@@ -140,7 +142,7 @@ If you need to call a tool, select the most appropriate one based on the query."
                 tools_used=tools_used,
                 tool_results=tool_results,
                 model_used=self._model,
-                tokens_used=0,  # Would need to extract from response
+                token_usage=token_usage,
                 ai_confidence=self._estimate_confidence(response, tools_used),
             )
 
@@ -246,7 +248,7 @@ If you need to call a tool, select the most appropriate one based on the query."
         messages: list[dict],
         tools: list[dict],
         context: str,
-    ) -> tuple[str, list[str], list[dict]]:
+    ) -> tuple[str, list[str], list[dict], TokenUsage]:
         """Call Bedrock converse API.
 
         Args:
@@ -255,7 +257,7 @@ If you need to call a tool, select the most appropriate one based on the query."
             context: RAG context.
 
         Returns:
-            Tuple of (response_text, tools_used, tool_results).
+            Tuple of (response_text, tools_used, tool_results, token_usage).
         """
         # Build system prompt with context
         system_prompts = [{"text": self.SYSTEM_PROMPT}]
@@ -276,6 +278,14 @@ If you need to call a tool, select the most appropriate one based on the query."
         content = response["output"]["message"]["content"]
         tools_used = []
         tool_results_list = []
+
+        # Extract token usage from initial response
+        usage = response.get("usage", {})
+        token_usage = TokenUsage(
+            input_tokens=usage.get("inputTokens", 0),
+            output_tokens=usage.get("outputTokens", 0),
+            total_tokens=usage.get("inputTokens", 0) + usage.get("outputTokens", 0),
+        )
 
         # Handle tool calls
         tool_uses = [b["toolUse"] for b in content if "toolUse" in b]
@@ -312,17 +322,25 @@ If you need to call a tool, select the most appropriate one based on the query."
                 inferenceConfig={"maxTokens": 4096, "temperature": 0.1},
             )
 
+            # Aggregate token usage from follow-up call
+            follow_usage = follow_response.get("usage", {})
+            token_usage = token_usage + TokenUsage(
+                input_tokens=follow_usage.get("inputTokens", 0),
+                output_tokens=follow_usage.get("outputTokens", 0),
+                total_tokens=follow_usage.get("inputTokens", 0) + follow_usage.get("outputTokens", 0),
+            )
+
             follow_content = follow_response["output"]["message"]["content"]
             text = next((b["text"] for b in follow_content if "text" in b), None)
             if text:
-                return text, tools_used, tool_results_list
+                return text, tools_used, tool_results_list, token_usage
 
         # Extract text response
         text = next((b["text"] for b in content if "text" in b), None)
         if text:
-            return text, tools_used, tool_results_list
+            return text, tools_used, tool_results_list, token_usage
 
-        return "I couldn't generate a response.", tools_used, tool_results_list
+        return "I couldn't generate a response.", tools_used, tool_results_list, token_usage
 
     def _fallback_response(
         self,
@@ -372,7 +390,7 @@ If you need to call a tool, select the most appropriate one based on the query."
                 tools_used=[],
                 tool_results=[],
                 model_used="fallback",
-                tokens_used=0,
+                token_usage=TokenUsage(),  # No tokens used for fallback
                 ai_confidence=0.7,
             )
 
@@ -381,7 +399,7 @@ If you need to call a tool, select the most appropriate one based on the query."
             tools_used=[],
             tool_results=[],
             model_used="fallback",
-            tokens_used=0,
+            token_usage=TokenUsage(),  # No tokens used for fallback
             ai_confidence=0.5,
         )
 

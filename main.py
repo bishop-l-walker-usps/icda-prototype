@@ -32,6 +32,7 @@ from icda.router import Router
 from icda.session import SessionManager
 from icda.knowledge import KnowledgeManager
 from icda.knowledge_watcher import KnowledgeWatcher
+from icda.download_tokens import DownloadTokenManager
 
 # Gemini Enforcer imports
 from icda.gemini import GeminiEnforcer, GeminiConfig
@@ -74,6 +75,9 @@ _orchestrator: AddressAgentOrchestrator = None
 
 # Gemini Enforcer global
 _enforcer: GeminiEnforcer = None
+
+# Download Token Manager global
+_download_manager: DownloadTokenManager = None
 
 
 def _extract_tags_from_content(content: str, filepath: Path) -> list[str]:
@@ -170,7 +174,7 @@ async def lifespan(app: FastAPI):
     global _cache, _embedder, _vector_index, _db, _nova, _sessions, _router, _knowledge, _knowledge_watcher
     global _address_index, _address_completer, _address_pipeline
     global _zip_database, _address_vector_index, _orchestrator
-    global _enforcer
+    global _enforcer, _download_manager
 
     print("\n" + "="*50)
     print("  ICDA Startup")
@@ -201,6 +205,10 @@ async def lifespan(app: FastAPI):
     print(f"Customer database: {len(_db.customers)} customers loaded")
 
     _sessions = SessionManager(_cache)
+
+    # Initialize download token manager
+    _download_manager = DownloadTokenManager(_cache)
+    print(f"Download token manager: threshold={_download_manager.pagination_threshold}, preview={_download_manager.preview_size}")
 
     # Initialize address verification
     print("\nInitializing address verification...")
@@ -388,6 +396,56 @@ class QueryRequest(BaseModel):
 async def query(req: QueryRequest):
     guards = req.guardrails.model_dump() if req.guardrails else None
     return await _router.route(req.query, req.bypass_cache, guards)
+
+
+@app.get("/api/query/download/{token}")
+async def download_results(token: str, format: str = "json"):
+    """Download full results using download token.
+
+    Args:
+        token: Download token from paginated query response.
+        format: Output format ('json' or 'csv').
+
+    Returns:
+        Full result set in requested format.
+    """
+    if not _download_manager:
+        return {"success": False, "error": "Download manager not available"}
+
+    result = await _download_manager.get_full_results_async(token)
+    if not result:
+        return {"success": False, "error": "Invalid or expired download token"}
+
+    if format == "csv":
+        import csv
+        import io
+        from fastapi.responses import StreamingResponse
+
+        data = result["data"]
+        if not data:
+            return {"success": False, "error": "No data to download"}
+
+        output = io.StringIO()
+        if data:
+            # Get all unique keys from all records
+            all_keys = set()
+            for record in data:
+                all_keys.update(record.keys())
+            fieldnames = sorted(all_keys)
+
+            writer = csv.DictWriter(output, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(data)
+
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=icda_results_{token[:8]}.csv"}
+        )
+
+    # Default: JSON format
+    return result
 
 
 @app.get("/api/health")
@@ -1175,18 +1233,36 @@ async def admin_validate_index():
 
 # ==================== Frontend ====================
 
+frontend_dist = BASE_DIR / "frontend" / "dist"
+frontend_index = frontend_dist / "index.html"
+
+# Mount static assets BEFORE catch-all routes
+if frontend_dist.exists() and (frontend_dist / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    frontend_index = BASE_DIR / "frontend" / "dist" / "index.html"
     if frontend_index.exists():
         return frontend_index.read_text()
     return (BASE_DIR / "templates/index.html").read_text()
 
 
-frontend_dist = BASE_DIR / "frontend" / "dist"
-if frontend_dist.exists():
-    app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
+# SPA catch-all route - serves index.html for client-side routing (admin, etc.)
+async def _serve_spa():
+    if frontend_index.exists():
+        return HTMLResponse(frontend_index.read_text())
+    return HTMLResponse((BASE_DIR / "templates/index.html").read_text())
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def spa_admin_root():
+    return await _serve_spa()
+
+
+@app.get("/admin/{path:path}", response_class=HTMLResponse)
+async def spa_admin_path(path: str):
+    return await _serve_spa()
 
 
 if __name__ == "__main__":

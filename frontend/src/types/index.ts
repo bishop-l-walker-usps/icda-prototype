@@ -117,12 +117,7 @@ export interface ChatMessage {
   type: 'user' | 'bot' | 'error' | 'blocked';
   content: string;
   timestamp: Date;
-  metadata?: {
-    route?: string;
-    latency_ms?: number;
-    cached?: boolean;
-    tool?: string;
-  };
+  metadata?: EnhancedChatMetadata;
 }
 
 export type PaneSize = 'collapsed' | 'normal' | 'expanded' | 'maxExpanded';
@@ -238,4 +233,94 @@ export interface KnowledgeHit {
   category: string;
   tags: string[];
   score: number;
+}
+
+// Token Usage Types (8-Agent Pipeline)
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  context_limit: number;
+  percentage_used: number;
+}
+
+// Pipeline Stage Types
+export type PipelineAgentType =
+  | 'intent'
+  | 'context'
+  | 'parser'
+  | 'resolver'
+  | 'search'
+  | 'knowledge'
+  | 'nova'
+  | 'enforcer';
+
+export type PipelineStageStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+
+export interface PipelineStage {
+  agent: PipelineAgentType;
+  status: PipelineStageStatus;
+  time_ms: number;
+  confidence?: number;
+  token_usage?: TokenUsage;
+  output_summary?: Record<string, unknown>;
+  error?: string;
+  route_decision?: Record<string, unknown>;
+  debug_info?: Record<string, unknown>;
+}
+
+export interface ModelRoutingDecision {
+  model_id: string;
+  model_tier: 'micro' | 'lite' | 'pro';
+  reason: string;
+  confidence_factor: number;
+}
+
+export interface PipelineTrace {
+  stages: PipelineStage[];
+  total_time_ms: number;
+  success: boolean;
+  total_token_usage?: TokenUsage;
+  model_routing_decision?: ModelRoutingDecision;
+  min_confidence?: number;
+}
+
+// Pagination Types
+export interface PaginationInfo {
+  total_count: number;
+  returned_count: number;
+  has_more: boolean;
+  suggest_download: boolean;
+  download_token?: string;
+  download_expires_at?: string;
+  preview_size: number;
+}
+
+// Enhanced Query Response (8-Agent Pipeline)
+export interface EnhancedQueryResponse extends QueryResponse {
+  token_usage?: TokenUsage;
+  trace?: PipelineTrace;
+  model_used?: string;
+  pagination?: PaginationInfo;
+  quality_score?: number;
+  guardrails_active?: boolean;
+  guardrails_bypassed?: boolean;
+  nova_route?: string;
+  results?: Record<string, unknown>[];
+}
+
+// Extended ChatMessage with enhanced metadata
+export interface EnhancedChatMetadata {
+  route?: string;
+  latency_ms?: number;
+  cached?: boolean;
+  tool?: string;
+  token_usage?: TokenUsage;
+  trace?: PipelineTrace;
+  pagination?: PaginationInfo;
+  model_used?: string;
+  quality_score?: number;
+  guardrails_active?: boolean;
+  guardrails_bypassed?: boolean;
+  results?: Record<string, unknown>[];
 }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { Box, Typography, Paper, Chip, Avatar } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import {
@@ -8,20 +8,47 @@ import {
   Error as ErrorIcon,
   Person as PersonIcon,
   Psychology as AIIcon,
+  ShieldOutlined as GuardrailsIcon,
 } from '@mui/icons-material';
 import { colors, borderRadius, transitions } from '../../theme';
 import { RouteChip } from './RouteChip';
+import { TokenUsageMeter } from '../TokenUsageMeter';
+import { PipelineTracePanel } from '../pipeline/PipelineTracePanel';
+import { PaginatedResults } from '../results/PaginatedResults';
 import type { ChatMessage } from '../../types';
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  onDownload?: (token: string, format: 'json' | 'csv') => void;
 }
 
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onDownload }) => {
+  const [isDownloading, setIsDownloading] = useState(false);
   const isUser = message.type === 'user';
   const isBlocked = message.type === 'blocked';
   const isError = message.type === 'error';
   const isBot = message.type === 'bot';
+
+  // Check for enhanced metadata
+  const hasTokenUsage = message.metadata?.token_usage;
+  const hasPipelineTrace = message.metadata?.trace;
+  const hasPagination = message.metadata?.pagination && message.metadata?.results;
+  const isGuardrailsBypassed = message.metadata?.guardrails_bypassed;
+
+  const handleDownload = useCallback(
+    async (format: 'json' | 'csv') => {
+      const token = message.metadata?.pagination?.download_token;
+      if (!token || !onDownload) return;
+
+      setIsDownloading(true);
+      try {
+        await onDownload(token, format);
+      } finally {
+        setIsDownloading(false);
+      }
+    },
+    [message.metadata?.pagination?.download_token, onDownload]
+  );
 
   return (
     <Box
@@ -217,7 +244,52 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
                 </Typography>
               </Box>
             )}
+
+            {/* Guardrails bypassed indicator */}
+            {isGuardrailsBypassed && (
+              <Chip
+                icon={<GuardrailsIcon sx={{ fontSize: 12 }} />}
+                label="Guardrails Off"
+                size="small"
+                aria-label="Guardrails bypassed"
+                sx={{
+                  fontSize: '0.65rem',
+                  height: 22,
+                  backgroundColor: alpha(colors.warning.main, 0.15),
+                  color: colors.warning.light,
+                  border: `1px solid ${alpha(colors.warning.main, 0.3)}`,
+                  '& .MuiChip-icon': {
+                    color: colors.warning.light,
+                  },
+                }}
+              />
+            )}
+
+            {/* Token usage meter (compact) */}
+            {hasTokenUsage && (
+              <TokenUsageMeter usage={message.metadata.token_usage!} compact />
+            )}
           </Box>
+        )}
+
+        {/* Enhanced components - only for bot messages */}
+        {isBot && (
+          <>
+            {/* Pipeline trace panel */}
+            {hasPipelineTrace && (
+              <PipelineTracePanel trace={message.metadata!.trace!} />
+            )}
+
+            {/* Paginated results */}
+            {hasPagination && (
+              <PaginatedResults
+                results={message.metadata!.results!}
+                pagination={message.metadata!.pagination!}
+                onDownload={handleDownload}
+                isDownloading={isDownloading}
+              />
+            )}
+          </>
         )}
       </Paper>
     </Box>

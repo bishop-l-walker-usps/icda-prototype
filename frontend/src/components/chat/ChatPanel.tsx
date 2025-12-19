@@ -11,9 +11,10 @@ interface ChatPanelProps {
   messages: ChatMessage[];
   loading: boolean;
   onQuickAction?: (query: string) => void;
+  onDownload?: (token: string, format: 'json' | 'csv') => void;
 }
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, loading, onQuickAction }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, loading, onQuickAction, onDownload }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasMessages = messages.length > 0;
 
@@ -106,7 +107,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ messages, loading, onQuick
 
             {/* Messages */}
             {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
+              <MessageBubble key={msg.id} message={msg} onDownload={onDownload} />
             ))}
           </>
         )}

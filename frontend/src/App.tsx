@@ -44,7 +44,7 @@ function MainChat() {
 
   // Custom hooks
   const { health, cacheStats, loading: healthLoading, refreshHealth, refreshCacheStats, clearCache } = useHealth();
-  const { messages, loading: queryLoading, sessionId, sendQuery, newSession } = useQuery();
+  const { messages, loading: queryLoading, sessionId, sendQuery, newSession, downloadResults } = useQuery();
 
   const handleToggleGuardrail = (key: keyof GuardrailFlags) => {
     setGuardrails((prev) => ({
@@ -143,6 +143,7 @@ function MainChat() {
           messages={messages}
           loading={queryLoading}
           onQuickAction={handleQuickAction}
+          onDownload={downloadResults}
         />
 
         {/* Query Input with address suggestions */}
