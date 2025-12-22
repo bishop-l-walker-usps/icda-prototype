@@ -111,6 +111,14 @@ Interpret queries flexibly (e.g., "Nevada folks" = state NV)."""
         if not self._available:
             return self._fallback_response(query, search_result, knowledge)
 
+        # ============================================================
+        # CRITICAL: If state not available, skip AI and use fallback
+        # The AI model tends to ignore context instructions, so we
+        # handle this case directly with a structured response
+        # ============================================================
+        if getattr(search_result, 'state_not_available', False):
+            return self._fallback_response(query, search_result, knowledge)
+
         # Use override model if provided
         model_to_use = model_override or self._model
 
