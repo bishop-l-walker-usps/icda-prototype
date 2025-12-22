@@ -1,16 +1,17 @@
 """
-Gemini Enforcer Package - DEPRECATED.
+Gemini Package - DEPRECATED.
 
 This package is deprecated. Use icda.llm instead for provider-agnostic LLM support.
 
-For backward compatibility, all exports are re-exported from icda.llm.
+All exports are re-exported from icda.llm for backward compatibility.
 
 Migration:
     # Old (deprecated)
-    from icda.gemini import GeminiEnforcer
+    from icda.gemini import GeminiEnforcer, GeminiClient
 
     # New (recommended)
-    from icda.llm import LLMEnforcer
+    from icda.llm import LLMEnforcer, create_llm_client
+    from icda.llm.providers import GeminiClient
 """
 
 import warnings
