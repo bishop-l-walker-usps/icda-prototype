@@ -38,6 +38,10 @@ Thumbs.db
 chroma_db/
 *.sqlite3
 
+# Knowledge base auto-indexed files (uploaded via API)
+knowledge/data-uploaded/
+knowledge/.index_state.json
+
 # Local settings (user-specific)
 settings.local.json
 

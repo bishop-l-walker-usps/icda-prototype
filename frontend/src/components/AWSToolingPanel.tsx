@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Box, Typography, Card, CardContent, Chip, Stack, IconButton, Tooltip } from '@mui/material';
+import { Box, Typography, Card, CardContent, Chip, Stack, IconButton, Tooltip, CircularProgress, Snackbar, Alert } from '@mui/material';
 import {
   Cloud as CloudIcon, Storage as StorageIcon, Memory as MemoryIcon, Search as SearchIcon,
   CheckCircle as CheckIcon, Cancel as CancelIcon, HourglassEmpty as LoadingIcon,
-  LibraryBooks as KnowledgeIcon,
+  LibraryBooks as KnowledgeIcon, Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import { colors } from '../theme';
 import { getStatusColor, getStatusBgColor, type Status } from '../utils';
@@ -31,6 +31,47 @@ const StatusIcon: React.FC<{ status: Status }> = ({ status }) => {
 
 export const AWSToolingPanel: React.FC<AWSToolingPanelProps> = ({ health, loading }) => {
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
+  const [snackbar, setSnackbar] = useState<{ open: boolean; message: string; severity: 'success' | 'error' }>({
+    open: false,
+    message: '',
+    severity: 'success',
+  });
+
+  const handleReindex = async () => {
+    setReindexing(true);
+    try {
+      const response = await fetch('/api/knowledge/reindex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        const indexed = result.indexed || 0;
+        const skipped = result.skipped || 0;
+        setSnackbar({
+          open: true,
+          message: `Reindex complete: ${indexed} indexed, ${skipped} unchanged`,
+          severity: 'success',
+        });
+      } else {
+        setSnackbar({
+          open: true,
+          message: result.error || 'Reindex failed',
+          severity: 'error',
+        });
+      }
+    } catch (error) {
+      setSnackbar({
+        open: true,
+        message: 'Failed to connect to server',
+        severity: 'error',
+      });
+    } finally {
+      setReindexing(false);
+    }
+  };
 
   return (
     <Box sx={{ p: 2 }}>
@@ -39,6 +80,7 @@ export const AWSToolingPanel: React.FC<AWSToolingPanelProps> = ({ health, loadin
         {SERVICES.map(({ name, desc, icon, key }) => {
           const status: Status = loading ? 'loading' : !health ? 'offline' : health[key] ? 'online' : 'offline';
           const isOpenSearch = key === 'opensearch';
+          const isTitan = key === 'embedder';
           return (
             <Card key={name} sx={{ backgroundColor: 'background.elevated', border: 1, borderColor: getStatusBgColor(status, '44') }}>
               <CardContent sx={{ py: 1.5, px: 2, '&:last-child': { pb: 1.5 } }}>
@@ -51,6 +93,28 @@ export const AWSToolingPanel: React.FC<AWSToolingPanelProps> = ({ health, loadin
                     </Box>
                   </Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                    {isTitan && (
+                      <Tooltip title="Reindex Knowledge Base">
+                        <span>
+                          <IconButton
+                            size="small"
+                            onClick={handleReindex}
+                            disabled={reindexing}
+                            sx={{
+                              color: colors.accent.main,
+                              '&:hover': { backgroundColor: `${colors.accent.main}22` },
+                              '&.Mui-disabled': { color: 'text.disabled' },
+                            }}
+                          >
+                            {reindexing ? (
+                              <CircularProgress size={16} color="inherit" />
+                            ) : (
+                              <RefreshIcon fontSize="small" />
+                            )}
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    )}
                     {isOpenSearch && (
                       <Tooltip title="Knowledge Base">
                         <IconButton
@@ -91,6 +155,22 @@ export const AWSToolingPanel: React.FC<AWSToolingPanelProps> = ({ health, loadin
         open={knowledgeModalOpen}
         onClose={() => setKnowledgeModalOpen(false)}
       />
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };
