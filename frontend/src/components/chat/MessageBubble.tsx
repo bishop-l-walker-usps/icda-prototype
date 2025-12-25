@@ -9,6 +9,7 @@ import {
   Person as PersonIcon,
   Psychology as AIIcon,
   ShieldOutlined as GuardrailsIcon,
+  Circle as QualityIcon,
 } from '@mui/icons-material';
 import { colors, borderRadius, transitions } from '../../theme';
 import { RouteChip } from './RouteChip';
@@ -21,6 +22,25 @@ interface MessageBubbleProps {
   message: ChatMessage;
   onDownload?: (token: string, format: 'json' | 'csv') => void;
 }
+
+/**
+ * Get quality indicator color and label based on score.
+ * - Red: < 0.5 (bad)
+ * - Yellow: 0.5 - 0.69 (acceptable)
+ * - Blue: 0.7 - 0.84 (good)
+ * - Green: >= 0.85 (great)
+ */
+const getQualityIndicator = (score: number): { color: string; label: string; bgColor: string } => {
+  if (score >= 0.85) {
+    return { color: colors.success.light, label: 'Great', bgColor: alpha(colors.success.main, 0.15) };
+  } else if (score >= 0.7) {
+    return { color: colors.info.light, label: 'Good', bgColor: alpha(colors.info.main, 0.15) };
+  } else if (score >= 0.5) {
+    return { color: colors.warning.light, label: 'OK', bgColor: alpha(colors.warning.main, 0.15) };
+  } else {
+    return { color: colors.error.light, label: 'Low', bgColor: alpha(colors.error.main, 0.15) };
+  }
+};
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onDownload }) => {
   const [isDownloading, setIsDownloading] = useState(false);
@@ -262,6 +282,31 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onDownloa
                   },
                 }}
               />
+            )}
+
+            {/* Quality score indicator */}
+            {message.metadata.quality_score !== undefined && (
+              (() => {
+                const quality = getQualityIndicator(message.metadata.quality_score);
+                return (
+                  <Chip
+                    icon={<QualityIcon sx={{ fontSize: 10 }} />}
+                    label={`${quality.label} (${Math.round(message.metadata.quality_score * 100)}%)`}
+                    size="small"
+                    aria-label={`Quality score: ${Math.round(message.metadata.quality_score * 100)}%`}
+                    sx={{
+                      fontSize: '0.65rem',
+                      height: 22,
+                      backgroundColor: quality.bgColor,
+                      color: quality.color,
+                      border: `1px solid ${alpha(quality.color, 0.3)}`,
+                      '& .MuiChip-icon': {
+                        color: quality.color,
+                      },
+                    }}
+                  />
+                );
+              })()
             )}
 
             {/* Token usage meter (compact) */}
