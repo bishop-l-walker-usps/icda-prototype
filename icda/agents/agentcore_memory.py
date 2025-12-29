@@ -57,7 +57,7 @@ class AgentCoreMemoryManager:
     # Memory resource name for ICDA
     MEMORY_NAME = "ICDAAgentMemory"
 
-    def __init__(self, region: str = "us-west-2"):
+    def __init__(self, region: str = "us-east-1"):
         """Initialize AgentCore memory manager.
 
         Args:
@@ -233,7 +233,7 @@ class AgentCoreSessionManager:
         "_available",
     )
 
-    def __init__(self, memory_id: str, region: str = "us-west-2"):
+    def __init__(self, memory_id: str, region: str = "us-east-1"):
         """Initialize session manager.
 
         Args:

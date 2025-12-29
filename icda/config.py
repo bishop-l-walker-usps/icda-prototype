@@ -96,7 +96,7 @@ class Config:
 
     # ==================== AgentCore Memory (optional - empty = local fallback) ====================
     agentcore_memory_id: str = field(default_factory=lambda: getenv("AGENTCORE_MEMORY_ID", ""))
-    agentcore_region: str = field(default_factory=lambda: getenv("AGENTCORE_REGION", "us-west-2"))
+    agentcore_region: str = field(default_factory=lambda: getenv("AGENTCORE_REGION", "us-east-1"))
     agentcore_enabled: bool = field(
         default_factory=lambda: _parse_bool(getenv("AGENTCORE_ENABLED", ""), True)
     )

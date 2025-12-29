@@ -109,7 +109,7 @@ class QueryOrchestrator:
     def __init__(
         self,
         db,
-        region: str = "us-west-2",
+        region: str = "us-east-1",
         model: str = "us.amazon.nova-micro-v1:0",
         vector_index=None,
         knowledge=None,
@@ -914,7 +914,7 @@ class QueryOrchestrator:
 
 def create_query_orchestrator(
     db,
-    region: str = "us-west-2",
+    region: str = "us-east-1",
     model: str = "us.amazon.nova-micro-v1:0",
     vector_index=None,
     knowledge=None,

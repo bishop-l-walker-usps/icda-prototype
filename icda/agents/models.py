@@ -256,7 +256,7 @@ class AgentCoreMemoryConfig:
         enabled: Whether AgentCore memory is enabled.
     """
     memory_id: str | None = None
-    region: str = "us-west-2"
+    region: str = "us-east-1"
     use_ltm: bool = True
     stm_retention_days: int = 7
     ltm_retention_days: int = 30
