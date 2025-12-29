@@ -241,6 +241,10 @@ class SearchAgent:
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Search with filters.
 
+        ENHANCED: Now supports status and origin_state filters for complex queries like:
+        - "show me inactive Texas customers who moved from California"
+        - "active customers in Nevada with 3+ moves"
+
         Args:
             parsed: Parsed query with filters.
 
@@ -248,19 +252,54 @@ class SearchAgent:
             Tuple of (results, metadata).
         """
         filters = parsed.filters
-        result = self._db.search(
-            state=filters.get("state"),
-            city=filters.get("city"),
-            min_moves=filters.get("min_move_count"),
-            customer_type=filters.get("customer_type"),
-            has_apartment=filters.get("has_apartment"),
-            limit=parsed.limit * 2,  # Get extra for confidence
-        )
+        logger.debug(f"SearchAgent._filtered_search: filters={filters}")
+
+        # =====================================================================
+        # CRITICAL FIX: Check if origin_state is present
+        # If so, use search_by_move_history() instead of search()
+        # This enables "Texas customers who moved from California" queries
+        # =====================================================================
+        origin_state = filters.get("origin_state")
+        destination_state = filters.get("state")
+        status = filters.get("status")
+
+        if origin_state:
+            # Use the move history search for "moved from X to Y" queries
+            logger.info(
+                f"SearchAgent: Using search_by_move_history - "
+                f"from_state={origin_state}, to_state={destination_state}, status={status}"
+            )
+            result = self._db.search_by_move_history(
+                from_state=origin_state,
+                to_state=destination_state,
+                status=status,
+                limit=parsed.limit * 2,
+            )
+        else:
+            # Standard filtered search with all available filters
+            result = self._db.search(
+                state=destination_state,
+                city=filters.get("city"),
+                min_moves=filters.get("min_move_count"),
+                customer_type=filters.get("customer_type"),
+                has_apartment=filters.get("has_apartment"),
+                status=status,  # CRITICAL FIX: Now using status filter!
+                limit=parsed.limit * 2,  # Get extra for confidence
+            )
 
         if result.get("success"):
             # Database returns "data" key, not "results"
             customers = result.get("data", [])
-            return customers, {"filters_applied": filters, "total": result.get("total", 0)}
+            applied_filters = {
+                **filters,
+                "origin_state_used": origin_state is not None,
+                "status_used": status is not None,
+            }
+            return customers, {
+                "filters_applied": applied_filters,
+                "total": result.get("total", 0),
+                "search_method": "move_history" if origin_state else "standard",
+            }
 
         # CRITICAL FIX: Propagate state_not_available error with full details
         # This allows the fallback loop to stop instead of trying basic_search

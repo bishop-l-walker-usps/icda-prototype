@@ -298,6 +298,301 @@ def create_default_registry(db, vector_index=None, knowledge=None, address_orche
     ))
 
     # ========================================================================
+    # NEW: ENHANCED QUERY TOOLS - Status Filtering
+    # ========================================================================
+    registry.register(ToolSpec(
+        name="filter_by_status",
+        description="Filter customers by status (ACTIVE, INACTIVE, PENDING). Use for queries like 'inactive customers', 'show me active customers in TX'.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "enum": ["ACTIVE", "INACTIVE", "PENDING"], "description": "Customer status to filter by"},
+                "state": {"type": "string", "description": "Optional two-letter state code"},
+                "limit": {"type": "integer", "description": "Max results (default 25)"}
+            },
+            "required": ["status"]
+        },
+        category=ToolCategory.CORE,
+        domains=[QueryDomain.CUSTOMER],
+        conditions=["always"],
+        executor=lambda p: db.search(
+            state=p.get("state"),
+            status=p.get("status"),
+            limit=p.get("limit", 25)
+        )
+    ))
+
+    registry.register(ToolSpec(
+        name="get_inactive_customers",
+        description="Get all inactive customers. Convenience tool for 'show me inactive customers' queries.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "state": {"type": "string", "description": "Optional two-letter state code"},
+                "limit": {"type": "integer", "description": "Max results (default 25)"}
+            }
+        },
+        category=ToolCategory.CORE,
+        domains=[QueryDomain.CUSTOMER],
+        conditions=["always"],
+        executor=lambda p: db.search(
+            state=p.get("state"),
+            status="INACTIVE",
+            limit=p.get("limit", 25)
+        )
+    ))
+
+    registry.register(ToolSpec(
+        name="get_active_customers",
+        description="Get all active customers. Convenience tool for 'show me active customers' queries.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "state": {"type": "string", "description": "Optional two-letter state code"},
+                "limit": {"type": "integer", "description": "Max results (default 25)"}
+            }
+        },
+        category=ToolCategory.CORE,
+        domains=[QueryDomain.CUSTOMER],
+        conditions=["always"],
+        executor=lambda p: db.search(
+            state=p.get("state"),
+            status="ACTIVE",
+            limit=p.get("limit", 25)
+        )
+    ))
+
+    # ========================================================================
+    # NEW: MOVE HISTORY ANALYSIS TOOLS - THE CRITICAL FIX
+    # ========================================================================
+    registry.register(ToolSpec(
+        name="customers_moved_from",
+        description="Find customers who moved FROM one state TO another. THE KEY TOOL for queries like 'Texas customers who moved from California', 'inactive customers who relocated from Nevada'.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "from_state": {"type": "string", "description": "State the customer moved FROM (origin)"},
+                "to_state": {"type": "string", "description": "Current state (where they moved TO)"},
+                "status": {"type": "string", "enum": ["ACTIVE", "INACTIVE", "PENDING"], "description": "Optional status filter"},
+                "limit": {"type": "integer", "description": "Max results (default 25)"}
+            },
+            "required": ["from_state", "to_state"]
+        },
+        category=ToolCategory.CORE,
+        domains=[QueryDomain.CUSTOMER],
+        conditions=["always"],
+        executor=lambda p: db.search_by_move_history(
+            from_state=p.get("from_state"),
+            to_state=p.get("to_state"),
+            status=p.get("status"),
+            limit=p.get("limit", 25)
+        )
+    ))
+
+    registry.register(ToolSpec(
+        name="customers_moved_after",
+        description="Find customers who moved after a specific date. Use for 'customers who moved after January 2024', 'recent movers'.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "after_date": {"type": "string", "description": "ISO date (YYYY-MM-DD) to filter moves after"},
+                "state": {"type": "string", "description": "Optional state filter"},
+                "limit": {"type": "integer", "description": "Max results (default 25)"}
+            },
+            "required": ["after_date"]
+        },
+        category=ToolCategory.CORE,
+        domains=[QueryDomain.CUSTOMER],
+        conditions=["always"],
+        executor=lambda p: db.range_search(
+            field="last_move",
+            min_value=p.get("after_date"),
+            state=p.get("state"),
+            limit=p.get("limit", 25)
+        )
+    ))
+
+    registry.register(ToolSpec(
+        name="get_move_timeline",
+        description="Get the complete move history timeline for a specific customer. Use when user asks about a customer's move history.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "crid": {"type": "string", "description": "Customer Record ID"}
+            },
+            "required": ["crid"]
+        },
+        category=ToolCategory.CORE,
+        domains=[QueryDomain.CUSTOMER],
+        conditions=["always"],
+        executor=lambda p: db.get_move_timeline(p.get("crid", ""))
+    ))
+
+    registry.register(ToolSpec(
+        name="high_movers_by_state",
+        description="Find customers with high move counts in a specific state. Use for 'high movers in Nevada', 'customers with 5+ moves in CA'.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "state": {"type": "string", "description": "Two-letter state code"},
+                "min_moves": {"type": "integer", "description": "Minimum number of moves (default 3)"},
+                "limit": {"type": "integer", "description": "Max results (default 25)"}
+            },
+            "required": ["state"]
+        },
+        category=ToolCategory.CORE,
+        domains=[QueryDomain.CUSTOMER],
+        conditions=["always"],
+        executor=lambda p: db.search(
+            state=p.get("state"),
+            min_moves=p.get("min_moves", 3),
+            limit=p.get("limit", 25)
+        )
+    ))
+
+    # ========================================================================
+    # NEW: AGGREGATION TOOLS
+    # ========================================================================
+    registry.register(ToolSpec(
+        name="count_by_criteria",
+        description="Fast count of customers matching criteria WITHOUT returning full data. Use for 'how many inactive customers in Texas?', 'count of business customers'.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "state": {"type": "string", "description": "State filter"},
+                "city": {"type": "string", "description": "City filter"},
+                "status": {"type": "string", "enum": ["ACTIVE", "INACTIVE", "PENDING"], "description": "Status filter"},
+                "customer_type": {"type": "string", "enum": ["RESIDENTIAL", "BUSINESS", "PO_BOX"], "description": "Customer type"},
+                "min_moves": {"type": "integer", "description": "Minimum move count"},
+                "from_state": {"type": "string", "description": "State they moved FROM"}
+            }
+        },
+        category=ToolCategory.ANALYTICS,
+        domains=[QueryDomain.STATS, QueryDomain.CUSTOMER],
+        conditions=["always"],
+        executor=lambda p: db.count_by_criteria(
+            state=p.get("state"),
+            city=p.get("city"),
+            status=p.get("status"),
+            customer_type=p.get("customer_type"),
+            min_moves=p.get("min_moves"),
+            from_state=p.get("from_state")
+        )
+    ))
+
+    registry.register(ToolSpec(
+        name="group_by_field",
+        description="Group and count customers by a field. Use for 'breakdown by status', 'customers per city', 'distribution by customer type'.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "field": {"type": "string", "enum": ["state", "status", "customer_type", "move_count", "city"], "description": "Field to group by"},
+                "state": {"type": "string", "description": "Optional state filter before grouping"},
+                "status": {"type": "string", "description": "Optional status filter before grouping"},
+                "customer_type": {"type": "string", "description": "Optional customer type filter"}
+            },
+            "required": ["field"]
+        },
+        category=ToolCategory.ANALYTICS,
+        domains=[QueryDomain.STATS, QueryDomain.CUSTOMER],
+        conditions=["always"],
+        executor=lambda p: db.group_by(
+            field=p.get("field"),
+            state=p.get("state"),
+            status=p.get("status"),
+            customer_type=p.get("customer_type")
+        )
+    ))
+
+    # ========================================================================
+    # NEW: ADVANCED SEARCH TOOLS
+    # ========================================================================
+    registry.register(ToolSpec(
+        name="range_filter",
+        description="Filter customers by numeric or date range. Use for 'customers with 3-5 moves', 'moved between January and March'.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "field": {"type": "string", "enum": ["move_count", "last_move", "created_date"], "description": "Field to filter on"},
+                "min_value": {"type": ["string", "integer"], "description": "Minimum value (inclusive)"},
+                "max_value": {"type": ["string", "integer"], "description": "Maximum value (inclusive)"},
+                "state": {"type": "string", "description": "Optional state filter"},
+                "limit": {"type": "integer", "description": "Max results"}
+            },
+            "required": ["field"]
+        },
+        category=ToolCategory.SEARCH,
+        domains=[QueryDomain.CUSTOMER],
+        conditions=["always"],
+        executor=lambda p: db.range_search(
+            field=p.get("field"),
+            min_value=p.get("min_value"),
+            max_value=p.get("max_value"),
+            state=p.get("state"),
+            limit=p.get("limit")
+        )
+    ))
+
+    registry.register(ToolSpec(
+        name="multi_criteria_search",
+        description="Search with multiple criteria using AND/OR logic. Use for complex compound queries like 'TX or CA customers who are inactive'.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "criteria": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "field": {"type": "string"},
+                            "operator": {"type": "string", "enum": ["equals", "contains", "greater_than", "less_than", "in", "not_equals"]},
+                            "value": {}
+                        }
+                    },
+                    "description": "Array of filter criteria"
+                },
+                "logic": {"type": "string", "enum": ["AND", "OR"], "description": "How to combine criteria (default AND)"},
+                "limit": {"type": "integer", "description": "Max results"}
+            },
+            "required": ["criteria"]
+        },
+        category=ToolCategory.SEARCH,
+        domains=[QueryDomain.CUSTOMER],
+        min_complexity=QueryComplexity.MEDIUM,
+        conditions=["always"],
+        executor=lambda p: db.multi_search(
+            criteria=p.get("criteria", []),
+            logic=p.get("logic", "AND"),
+            limit=p.get("limit")
+        )
+    ))
+
+    registry.register(ToolSpec(
+        name="regex_search",
+        description="Search using regex pattern matching on text fields. Use for pattern-based queries like 'addresses containing Suite or Ste'.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "field": {"type": "string", "enum": ["name", "address", "city"], "description": "Field to search"},
+                "pattern": {"type": "string", "description": "Regex pattern to match"},
+                "state": {"type": "string", "description": "Optional state filter"},
+                "limit": {"type": "integer", "description": "Max results"}
+            },
+            "required": ["field", "pattern"]
+        },
+        category=ToolCategory.SEARCH,
+        domains=[QueryDomain.CUSTOMER],
+        min_complexity=QueryComplexity.MEDIUM,
+        conditions=["always"],
+        executor=lambda p: db.regex_search(
+            field=p.get("field"),
+            pattern=p.get("pattern"),
+            state=p.get("state"),
+            limit=p.get("limit")
+        )
+    ))
+
+    # ========================================================================
     # SEARCH TOOLS (always available, different strategies)
     # ========================================================================
     registry.register(ToolSpec(

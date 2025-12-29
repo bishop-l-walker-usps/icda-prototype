@@ -32,14 +32,15 @@ logger = logging.getLogger(__name__)
 
 
 # SQL complexity indicators that require Nova Pro
+# NOTE: "breakdown" removed - it's common in STATS queries and doesn't need PRO
 SQL_COMPLEX_INDICATORS = frozenset([
     "aggregate", "aggregation", "join", "joined",
     "group by", "groupby", "having",
     "subquery", "nested", "union", "intersect", "except",
     "percentile", "median", "mode", "correlation",
     "average", "mean", "standard deviation", "variance",
-    "trend", "pattern", "over time", "comparison",
-    "breakdown", "distribution", "histogram",
+    "over time", "correlation analysis",
+    "distribution analysis", "histogram",
 ])
 
 # Intents that typically require more sophisticated reasoning
@@ -146,6 +147,10 @@ class ModelRouter:
         # Rule 6: SQL complexity indicators
         if self._has_sql_complexity(intent, parsed):
             pro_reasons.append("sql_complexity")
+
+        # Rule 7: Multi-filter queries (3+ filters = complex)
+        if parsed and self._has_complex_filters(parsed):
+            pro_reasons.append("multi_filter_query")
 
         # If any Pro reasons found, use Pro
         if pro_reasons:
@@ -254,6 +259,30 @@ class ModelRouter:
                 return True
 
         return False
+
+    def _has_complex_filters(self, parsed: ParsedQuery) -> bool:
+        """Check if query has multiple filters requiring Pro reasoning.
+
+        Multi-filter queries (3+ filters like state + status + origin_state)
+        need Pro for proper SQL-like filtering and response generation.
+
+        Args:
+            parsed: Parsed query with extracted filters.
+
+        Returns:
+            True if 3+ meaningful filters are detected.
+        """
+        if not parsed.filters:
+            return False
+
+        # Count meaningful filters (exclude internal fields like _city_state_mismatch)
+        meaningful_filters = [
+            k for k in parsed.filters.keys()
+            if not k.startswith("_")
+        ]
+
+        # 3+ filters = complex query needing Pro
+        return len(meaningful_filters) >= 3
 
     @property
     def threshold(self) -> float:

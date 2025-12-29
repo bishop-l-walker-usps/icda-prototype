@@ -220,9 +220,21 @@ class CustomerDB:
                     return {"success": True, "data": data}
         return {"success": False, "error": f"CRID {crid} not found"}
 
-    def search(self, state: str = None, city: str = None, min_moves: int = None, customer_type: str = None, has_apartment: bool = None, limit: int = None) -> dict:
-        """Search customers with filters. Returns error if requested state not in dataset."""
-        
+    def search(self, state: str = None, city: str = None, min_moves: int = None,
+               customer_type: str = None, has_apartment: bool = None,
+               status: str = None, limit: int = None) -> dict:
+        """Search customers with filters. Returns error if requested state not in dataset.
+
+        Args:
+            state: Two-letter state code (e.g., "TX", "CA")
+            city: City name (partial match)
+            min_moves: Minimum number of moves
+            customer_type: RESIDENTIAL, BUSINESS, or PO_BOX
+            has_apartment: True to filter for apartment/unit addresses
+            status: ACTIVE, INACTIVE, or PENDING
+            limit: Maximum number of results to return
+        """
+
         # Check if requested state exists in dataset
         if state:
             state_upper = state.upper()
@@ -243,7 +255,12 @@ class CustomerDB:
             results = self.by_state.get(state_upper, [])
         else:
             results = self.customers
-            
+
+        # Filter by status (ACTIVE, INACTIVE, PENDING)
+        if status:
+            status_upper = status.upper()
+            results = [c for c in results if c.get("status", "").upper() == status_upper]
+
         if min_moves:
             results = [c for c in results if c["move_count"] >= min_moves]
         if city:
@@ -260,6 +277,381 @@ class CustomerDB:
 
     def stats(self) -> dict:
         return {"success": True, "data": {s: len(c) for s, c in self.by_state.items()}, "total": len(self.customers)}
+
+    # =========================================================================
+    # NEW TOOLS - Enhanced Query Capabilities
+    # =========================================================================
+
+    def search_by_move_history(self, from_state: str = None, to_state: str = None,
+                                status: str = None, limit: int = None) -> dict:
+        """THE CRITICAL MISSING METHOD - Find customers who moved from one state to another.
+
+        This enables queries like "show me Texas customers who moved from California".
+
+        Args:
+            from_state: State the customer moved FROM (checks move_history)
+            to_state: Current state (where they moved TO)
+            status: ACTIVE, INACTIVE, or PENDING
+            limit: Maximum number of results
+        """
+        # Start with all customers or filter by current state
+        if to_state:
+            to_state_upper = to_state.upper()
+            if to_state_upper not in self.available_states:
+                state_name = self.STATE_CODE_TO_NAME.get(to_state_upper, to_state_upper)
+                return {
+                    "success": False,
+                    "error": "state_not_available",
+                    "message": f"No customer data for {state_name} ({to_state_upper}).",
+                    "requested_state": to_state_upper,
+                }
+            results = self.by_state.get(to_state_upper, [])
+        else:
+            results = self.customers
+
+        # Filter by status
+        if status:
+            status_upper = status.upper()
+            results = [c for c in results if c.get("status", "").upper() == status_upper]
+
+        # Filter by origin state (moved FROM) - check move_history
+        if from_state:
+            from_state_upper = from_state.upper()
+            filtered = []
+            for c in results:
+                move_history = c.get("move_history", [])
+                # Check if any previous move was FROM the specified state
+                for move in move_history:
+                    # Move history shows where they moved TO, so previous state
+                    # would be inferred from the sequence or from "from_address"
+                    move_state = move.get("state", "")
+                    if move_state.upper() == from_state_upper:
+                        filtered.append(c)
+                        break
+            results = filtered
+
+        data = results[:limit] if limit else results
+        return {
+            "success": True,
+            "total": len(results),
+            "data": data,
+            "filters_applied": {
+                "from_state": from_state,
+                "to_state": to_state,
+                "status": status,
+            }
+        }
+
+    def get_move_timeline(self, crid: str) -> dict:
+        """Get complete move history timeline for a customer.
+
+        Args:
+            crid: Customer Record ID
+        """
+        result = self.lookup(crid)
+        if not result.get("success"):
+            return result
+
+        customer = result["data"]
+        move_history = customer.get("move_history", [])
+
+        return {
+            "success": True,
+            "crid": customer["crid"],
+            "name": customer["name"],
+            "current_address": {
+                "address": customer.get("address"),
+                "city": customer.get("city"),
+                "state": customer.get("state"),
+                "zip": customer.get("zip"),
+            },
+            "move_count": customer.get("move_count", 0),
+            "last_move": customer.get("last_move"),
+            "move_history": move_history,
+            "timeline": [
+                {
+                    "index": i + 1,
+                    "from_address": move.get("from_address"),
+                    "to_address": move.get("to_address"),
+                    "city": move.get("city"),
+                    "state": move.get("state"),
+                    "zip": move.get("zip"),
+                    "move_date": move.get("move_date"),
+                }
+                for i, move in enumerate(move_history)
+            ]
+        }
+
+    def group_by(self, field: str, state: str = None, status: str = None,
+                 customer_type: str = None) -> dict:
+        """Group and count customers by a specific field.
+
+        Args:
+            field: Field to group by (state, status, customer_type, move_count)
+            state: Optional state filter before grouping
+            status: Optional status filter before grouping
+            customer_type: Optional customer type filter before grouping
+        """
+        valid_fields = {"state", "status", "customer_type", "move_count", "city"}
+        if field not in valid_fields:
+            return {"success": False, "error": f"Invalid field. Use one of: {valid_fields}"}
+
+        # Apply filters first
+        results = self.customers
+        if state:
+            state_upper = state.upper()
+            results = [c for c in results if c.get("state", "").upper() == state_upper]
+        if status:
+            status_upper = status.upper()
+            results = [c for c in results if c.get("status", "").upper() == status_upper]
+        if customer_type:
+            ct_upper = customer_type.upper()
+            results = [c for c in results if c.get("customer_type", "").upper() == ct_upper]
+
+        # Group by field
+        groups: dict[str, int] = {}
+        for c in results:
+            value = c.get(field, "UNKNOWN")
+            if isinstance(value, int):
+                value = str(value)
+            groups[value] = groups.get(value, 0) + 1
+
+        # Sort by count descending
+        sorted_groups = sorted(groups.items(), key=lambda x: -x[1])
+
+        return {
+            "success": True,
+            "field": field,
+            "total_records": len(results),
+            "unique_values": len(groups),
+            "groups": [{"value": v, "count": c} for v, c in sorted_groups],
+            "filters_applied": {"state": state, "status": status, "customer_type": customer_type}
+        }
+
+    def count_by_criteria(self, state: str = None, city: str = None, status: str = None,
+                          customer_type: str = None, min_moves: int = None,
+                          from_state: str = None) -> dict:
+        """Fast count without returning full data - optimized for "how many" questions.
+
+        Args:
+            state: Current state filter
+            city: City filter (partial match)
+            status: ACTIVE, INACTIVE, or PENDING
+            customer_type: RESIDENTIAL, BUSINESS, or PO_BOX
+            min_moves: Minimum number of moves
+            from_state: State they moved FROM (checks move_history)
+        """
+        results = self.customers
+
+        if state:
+            state_upper = state.upper()
+            if state_upper not in self.available_states:
+                return {"success": True, "count": 0, "reason": f"No data for state {state_upper}"}
+            results = self.by_state.get(state_upper, [])
+
+        if status:
+            status_upper = status.upper()
+            results = [c for c in results if c.get("status", "").upper() == status_upper]
+
+        if city:
+            city_lower = city.casefold()
+            results = [c for c in results if city_lower in c.get("city", "").casefold()]
+
+        if customer_type:
+            ct_upper = customer_type.upper()
+            results = [c for c in results if c.get("customer_type", "").upper() == ct_upper]
+
+        if min_moves:
+            results = [c for c in results if c.get("move_count", 0) >= min_moves]
+
+        if from_state:
+            from_upper = from_state.upper()
+            results = [
+                c for c in results
+                if any(m.get("state", "").upper() == from_upper for m in c.get("move_history", []))
+            ]
+
+        return {
+            "success": True,
+            "count": len(results),
+            "filters_applied": {
+                "state": state, "city": city, "status": status,
+                "customer_type": customer_type, "min_moves": min_moves,
+                "from_state": from_state
+            }
+        }
+
+    def range_search(self, field: str, min_value=None, max_value=None,
+                     state: str = None, status: str = None, limit: int = None) -> dict:
+        """Filter customers by numeric or date range.
+
+        Args:
+            field: Field to filter (move_count, last_move, created_date)
+            min_value: Minimum value (inclusive)
+            max_value: Maximum value (inclusive)
+            state: Optional state filter
+            status: Optional status filter
+            limit: Maximum results
+        """
+        valid_fields = {"move_count", "last_move", "created_date"}
+        if field not in valid_fields:
+            return {"success": False, "error": f"Invalid field. Use one of: {valid_fields}"}
+
+        results = self.customers
+
+        if state:
+            state_upper = state.upper()
+            if state_upper in self.available_states:
+                results = self.by_state.get(state_upper, [])
+            else:
+                return {"success": True, "total": 0, "data": [], "reason": f"No data for {state_upper}"}
+
+        if status:
+            status_upper = status.upper()
+            results = [c for c in results if c.get("status", "").upper() == status_upper]
+
+        # Apply range filter
+        filtered = []
+        for c in results:
+            value = c.get(field)
+            if value is None:
+                continue
+
+            # Handle numeric vs string (date) comparison
+            if field == "move_count":
+                if min_value is not None and value < min_value:
+                    continue
+                if max_value is not None and value > max_value:
+                    continue
+            else:
+                # Date comparison (string ISO format works for comparison)
+                if min_value is not None and value < str(min_value):
+                    continue
+                if max_value is not None and value > str(max_value):
+                    continue
+            filtered.append(c)
+
+        data = filtered[:limit] if limit else filtered
+        return {
+            "success": True,
+            "total": len(filtered),
+            "data": data,
+            "field": field,
+            "range": {"min": min_value, "max": max_value}
+        }
+
+    def multi_search(self, criteria: list[dict], logic: str = "AND", limit: int = None) -> dict:
+        """Search with multiple criteria using AND/OR logic.
+
+        Args:
+            criteria: List of filter criteria, each with {field, operator, value}
+                      Operators: equals, contains, greater_than, less_than, in
+            logic: "AND" (all must match) or "OR" (any can match)
+            limit: Maximum results
+
+        Example:
+            criteria=[
+                {"field": "state", "operator": "in", "value": ["TX", "CA"]},
+                {"field": "status", "operator": "equals", "value": "INACTIVE"}
+            ]
+        """
+        if not criteria:
+            return {"success": False, "error": "No criteria provided"}
+
+        def matches_criterion(customer: dict, crit: dict) -> bool:
+            field = crit.get("field")
+            operator = crit.get("operator", "equals")
+            value = crit.get("value")
+
+            customer_value = customer.get(field)
+            if customer_value is None:
+                return False
+
+            # Normalize strings for comparison
+            if isinstance(customer_value, str):
+                customer_value = customer_value.upper()
+            if isinstance(value, str):
+                value = value.upper()
+            if isinstance(value, list):
+                value = [v.upper() if isinstance(v, str) else v for v in value]
+
+            match operator:
+                case "equals":
+                    return customer_value == value
+                case "contains":
+                    return value in str(customer_value)
+                case "greater_than":
+                    return customer_value > value
+                case "less_than":
+                    return customer_value < value
+                case "in":
+                    return customer_value in value
+                case "not_equals":
+                    return customer_value != value
+                case _:
+                    return False
+
+        results = []
+        for c in self.customers:
+            if logic.upper() == "AND":
+                if all(matches_criterion(c, crit) for crit in criteria):
+                    results.append(c)
+            else:  # OR
+                if any(matches_criterion(c, crit) for crit in criteria):
+                    results.append(c)
+
+        data = results[:limit] if limit else results
+        return {
+            "success": True,
+            "total": len(results),
+            "data": data,
+            "logic": logic,
+            "criteria_count": len(criteria)
+        }
+
+    def regex_search(self, field: str, pattern: str, state: str = None,
+                     status: str = None, limit: int = None) -> dict:
+        """Search using regex pattern matching.
+
+        Args:
+            field: Field to search (name, address, city)
+            pattern: Regex pattern to match
+            state: Optional state filter
+            status: Optional status filter
+            limit: Maximum results
+        """
+        valid_fields = {"name", "address", "city"}
+        if field not in valid_fields:
+            return {"success": False, "error": f"Invalid field. Use one of: {valid_fields}"}
+
+        try:
+            compiled = re.compile(pattern, re.IGNORECASE)
+        except re.error as e:
+            return {"success": False, "error": f"Invalid regex pattern: {e}"}
+
+        results = self.customers
+
+        if state:
+            state_upper = state.upper()
+            if state_upper in self.available_states:
+                results = self.by_state.get(state_upper, [])
+            else:
+                return {"success": True, "total": 0, "data": []}
+
+        if status:
+            status_upper = status.upper()
+            results = [c for c in results if c.get("status", "").upper() == status_upper]
+
+        matched = [c for c in results if compiled.search(c.get(field, ""))]
+        data = matched[:limit] if limit else matched
+
+        return {
+            "success": True,
+            "total": len(matched),
+            "data": data,
+            "field": field,
+            "pattern": pattern
+        }
 
     def execute(self, tool: str, query: str) -> dict:
         q = query.casefold()

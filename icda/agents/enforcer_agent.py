@@ -165,6 +165,13 @@ class EnforcerAgent:
         else:
             gates_failed.append(confidence_result)
 
+        # Gate 8: Filter Match - do results match requested filters (state, city)?
+        filter_result = self._check_filter_match(parsed, nova_response.tool_results, modified)
+        if filter_result.passed:
+            gates_passed.append(filter_result)
+        else:
+            gates_failed.append(filter_result)
+
         # Optional: LLM AI-powered validation for hallucination detection
         llm_quality_boost = 0.0
         if self._llm_enforcer and self._llm_enforcer.available:
@@ -559,6 +566,106 @@ class EnforcerAgent:
             message=f"AI confidence {ai_confidence:.2f} < {threshold}",
         )
 
+    def _check_filter_match(
+        self,
+        parsed: ParsedQuery,
+        tool_results: list[dict[str, Any]],
+        response: str,
+    ) -> QualityGateResult:
+        """Check if results match the requested filters (state, city, etc.).
+
+        This gate catches cases where:
+        - User asks for TX but gets AZ results
+        - User asks for Miami but gets Las Vegas
+        - User asks for filters that weren't applied
+
+        Args:
+            parsed: Parsed query with filters.
+            tool_results: Results from search.
+            response: Response text (to check for admissions of filter issues).
+
+        Returns:
+            QualityGateResult.
+        """
+        response_lower = response.lower()
+        issues = []
+
+        # Check if response admits it couldn't apply filters
+        filter_failure_phrases = [
+            "cannot filter",
+            "no information about",
+            "don't have data for",
+            "does not provide",
+            "however, the context does not",
+            "cannot filter based on",
+        ]
+        for phrase in filter_failure_phrases:
+            if phrase in response_lower:
+                issues.append(f"Response admits filter limitation: '{phrase}'")
+
+        # Extract requested state from parsed query
+        requested_state = parsed.filters.get("state", "").upper() if parsed.filters else ""
+
+        # Extract states from tool results
+        result_states = set()
+        for result in tool_results:
+            if isinstance(result, dict):
+                # Check data list (common format)
+                for customer in result.get("data", result.get("results", [])):
+                    if isinstance(customer, dict) and customer.get("state"):
+                        result_states.add(customer["state"].upper())
+
+        # State mismatch detection
+        if requested_state and result_states:
+            if requested_state not in result_states:
+                # Results don't contain requested state at all
+                issues.append(
+                    f"State mismatch: requested {requested_state}, "
+                    f"got {', '.join(sorted(result_states))}"
+                )
+            elif len(result_states) > 1:
+                # Multiple states in results when one was requested
+                other_states = result_states - {requested_state}
+                if other_states:
+                    issues.append(
+                        f"Results include unexpected states: {', '.join(sorted(other_states))}"
+                    )
+
+        # Check for city mismatch
+        requested_city = parsed.filters.get("city", "").lower() if parsed.filters else ""
+        if requested_city:
+            result_cities = set()
+            for result in tool_results:
+                if isinstance(result, dict):
+                    for customer in result.get("data", result.get("results", [])):
+                        if isinstance(customer, dict) and customer.get("city"):
+                            result_cities.add(customer["city"].lower())
+
+            if result_cities and requested_city not in result_cities:
+                issues.append(
+                    f"City mismatch: requested {requested_city}, "
+                    f"got {', '.join(sorted(result_cities)[:3])}"
+                )
+
+        # Determine pass/fail
+        if issues:
+            return QualityGateResult(
+                gate=QualityGate.FILTER_MATCH,
+                passed=False,
+                message="; ".join(issues),
+                details={
+                    "requested_state": requested_state,
+                    "result_states": list(result_states),
+                    "issues": issues,
+                },
+            )
+
+        return QualityGateResult(
+            gate=QualityGate.FILTER_MATCH,
+            passed=True,
+            message="Results match requested filters",
+        )
+
     def _determine_status(
         self,
         gates_passed: list[QualityGateResult],
@@ -587,8 +694,8 @@ class EnforcerAgent:
                 return ResponseStatus.MODIFIED
             return ResponseStatus.APPROVED
 
-        # Critical gates failed
-        critical_gates = {QualityGate.PII_SAFE, QualityGate.RESPONSIVE, QualityGate.FACTUAL}
+        # Critical gates failed (FILTER_MATCH added - wrong state = critical)
+        critical_gates = {QualityGate.PII_SAFE, QualityGate.RESPONSIVE, QualityGate.FACTUAL, QualityGate.FILTER_MATCH}
         critical_failed = [g for g in gates_failed if g.gate in critical_gates]
 
         if critical_failed:
@@ -619,8 +726,8 @@ class EnforcerAgent:
         if enforced.quality_score < 0.5:
             return True
 
-        # Critical gate failures warrant escalation
-        critical_gates = {QualityGate.FACTUAL, QualityGate.RESPONSIVE}
+        # Critical gate failures warrant escalation (FILTER_MATCH = wrong state/city)
+        critical_gates = {QualityGate.FACTUAL, QualityGate.RESPONSIVE, QualityGate.FILTER_MATCH}
         for gate_result in enforced.gates_failed:
             if gate_result.gate in critical_gates:
                 return True

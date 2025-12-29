@@ -106,6 +106,44 @@ class ParserAgent:
         r"moved\s+(?:at\s+least\s+)?(\d+)": None,  # Extract number
     }
 
+    # Status filter patterns - THE FIX for "inactive customers" queries
+    STATUS_PATTERNS = {
+        "INACTIVE": [
+            r"\binactive\b",
+            r"\bdormant\b",
+            r"\bcanceled\b",
+            r"\bcancelled\b",
+            r"\bnot\s+active\b",
+            r"\bno\s+longer\s+active\b",
+            r"\blapsed\b",
+            r"\bsuspended\b",
+            r"\bdeactivated\b",
+        ],
+        "ACTIVE": [
+            r"\bactive\b",
+            r"\bcurrent\b",
+            r"\bstill\s+active\b",
+            r"\benabled\b",
+        ],
+        "PENDING": [
+            r"\bpending\b",
+            r"\bawaiting\b",
+            r"\bunconfirmed\b",
+        ],
+    }
+
+    # Move origin patterns - THE FIX for "moved from California" queries
+    MOVE_ORIGIN_PATTERNS = [
+        # "moved from California", "relocated from Texas"
+        r"(?:moved|relocated|transferred|came)\s+from\s+([a-zA-Z\s]+?)(?:\s+to\s+|\s*$|,|\s+and\s+|\s+who)",
+        # "originally from California"
+        r"originally\s+from\s+([a-zA-Z\s]+?)(?:\s+to\s+|\s*$|,)",
+        # "previously in California", "formerly in Texas"
+        r"(?:previously|formerly)\s+(?:in|from)\s+([a-zA-Z\s]+?)(?:\s+to\s+|\s*$|,)",
+        # "who were in California" (past tense implies moved)
+        r"who\s+were\s+in\s+([a-zA-Z\s]+?)(?:\s+and\s+|\s*$|,)",
+    ]
+
     def _correct_state_typos(self, text: str, notes: list[str]) -> str:
         """Correct common state name misspellings.
 
@@ -522,6 +560,62 @@ class ParserAgent:
         if any(word in query_lower for word in ["apartment", "apt", "unit", "condo"]):
             filters["has_apartment"] = True
             notes.append("Filter: apartment/unit addresses only")
+
+        # =====================================================================
+        # NEW: Extract status filter (ACTIVE, INACTIVE, PENDING)
+        # This enables queries like "show me inactive customers"
+        # =====================================================================
+        for status, patterns in self.STATUS_PATTERNS.items():
+            for pattern in patterns:
+                if re.search(pattern, query_lower):
+                    filters["status"] = status
+                    notes.append(f"Status filter: {status}")
+                    logger.debug(f"ParserAgent: Extracted status={status} from pattern '{pattern}'")
+                    break
+            if "status" in filters:
+                break
+
+        # =====================================================================
+        # NEW: Extract origin state (for "moved from X" queries)
+        # IMPORTANT: Do this BEFORE state filter so we can exclude origin from main state
+        # This enables queries like "customers who moved from California"
+        # =====================================================================
+        for pattern in self.MOVE_ORIGIN_PATTERNS:
+            match = re.search(pattern, query_lower)
+            if match:
+                origin_text = match.group(1).strip()
+                # Try to resolve to a state code
+                origin_code = None
+
+                # Check exact state name match
+                if origin_text.lower() in self.STATE_NAMES:
+                    origin_code = self.STATE_NAMES[origin_text.lower()]
+                else:
+                    # Try fuzzy matching
+                    origin_code = self._fuzzy_match_state(origin_text.title(), notes)
+
+                if origin_code:
+                    filters["origin_state"] = origin_code
+                    notes.append(f"Origin state filter: {origin_text} -> {origin_code}")
+                    logger.debug(f"ParserAgent: Extracted origin_state={origin_code} from '{origin_text}'")
+
+                    # FIX: If origin_state matches the current "state" filter, we need to
+                    # re-extract the main state by finding ANOTHER state in the query
+                    if filters.get("state") == origin_code:
+                        logger.debug(f"ParserAgent: state={origin_code} same as origin, re-extracting...")
+                        del filters["state"]
+                        # Find another state in the query that's NOT the origin
+                        for name, code in self.STATE_NAMES.items():
+                            if code != origin_code:
+                                state_pattern = rf"\b{re.escape(name)}\b"
+                                if re.search(state_pattern, query_lower):
+                                    filters["state"] = code
+                                    notes.append(f"Destination state: {name} -> {code}")
+                                    logger.debug(f"ParserAgent: Re-extracted state={code} (destination)")
+                                    break
+                    break
+                else:
+                    logger.warning(f"ParserAgent: Found 'moved from' pattern but couldn't resolve '{origin_text}' to state code")
 
         logger.debug(f"ParserAgent._extract_filters: FINAL filters={filters}")
         return filters

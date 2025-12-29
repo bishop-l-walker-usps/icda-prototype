@@ -39,6 +39,7 @@ class QualityGate(str, Enum):
     COHERENT = "coherent"               # Response is well-formed
     ON_TOPIC = "on_topic"               # No off-topic content
     CONFIDENCE_MET = "confidence_met"   # Above threshold
+    FILTER_MATCH = "filter_match"       # Results match requested filters (state, city, etc.)
 
 
 class SearchStrategy(str, Enum):

@@ -63,18 +63,65 @@ QUERY INTERPRETATION:
 - Use conversation history for context"""
 
     TOOLS = [
+        # ======== CORE LOOKUP TOOLS ========
         {"toolSpec": {"name": "lookup_crid", "description": "Look up a specific customer by their CRID (Customer Record ID). Use when user mentions a specific CRID or customer ID.",
             "inputSchema": {"json": {"type": "object", "properties": {"crid": {"type": "string", "description": "The Customer Record ID (e.g., CRID-00001)"}}, "required": ["crid"]}}}},
-        {"toolSpec": {"name": "search_customers", "description": "Search and COUNT customers with filters. USE THIS for any filtered queries like 'customers in California', 'apartment renters', 'how many residential customers', etc. Returns matching customers with total count.",
+
+        {"toolSpec": {"name": "search_customers", "description": "Search and COUNT customers with filters including STATUS. USE THIS for filtered queries like 'inactive customers in California', 'active apartment renters'. Supports status filter (ACTIVE/INACTIVE/PENDING).",
             "inputSchema": {"json": {"type": "object", "properties": {
                 "state": {"type": "string", "description": "Two-letter state code (NV, CA, TX, NY, FL, etc). Convert state names: California=CA, Nevada=NV, Texas=TX."},
                 "city": {"type": "string", "description": "City name to filter by"},
+                "status": {"type": "string", "description": "Customer status: ACTIVE, INACTIVE, or PENDING. Use for 'inactive customers', 'active users'."},
                 "min_move_count": {"type": "integer", "description": "Minimum number of moves. Use 2-3 for 'frequent movers', 5+ for 'high movers'"},
-                "customer_type": {"type": "string", "description": "Customer type: RESIDENTIAL (renters, homeowners), BUSINESS (companies), or PO_BOX. Use RESIDENTIAL for 'renters' or 'apartment' queries."},
-                "has_apartment": {"type": "boolean", "description": "Set true to filter for apartment/unit addresses only (addresses containing Apt or Unit). Use for 'apartment renters' queries."},
+                "customer_type": {"type": "string", "description": "Customer type: RESIDENTIAL (renters, homeowners), BUSINESS (companies), or PO_BOX."},
+                "has_apartment": {"type": "boolean", "description": "Set true to filter for apartment/unit addresses only."},
                 "limit": {"type": "integer", "description": "Max results to return (default 10, max 100)"}}}}}},
-        {"toolSpec": {"name": "get_stats", "description": "Get ONLY overall statistics by state (no filters). Use ONLY for general breakdowns like 'show stats' or 'breakdown by state'. Do NOT use for filtered counts - use search_customers instead.",
-            "inputSchema": {"json": {"type": "object", "properties": {}}}}}
+
+        {"toolSpec": {"name": "get_stats", "description": "Get overall statistics by state (no filters). Use for general breakdowns like 'show stats' or 'breakdown by state'.",
+            "inputSchema": {"json": {"type": "object", "properties": {}}}}},
+
+        # ======== NEW: MOVE HISTORY TOOLS (THE CRITICAL FIX) ========
+        {"toolSpec": {"name": "customers_moved_from",
+            "description": "THE KEY TOOL for queries like 'Texas customers who moved from California', 'inactive customers who relocated from Nevada'. Finds customers who moved FROM one state TO another.",
+            "inputSchema": {"json": {"type": "object", "properties": {
+                "from_state": {"type": "string", "description": "State the customer moved FROM (origin state)"},
+                "to_state": {"type": "string", "description": "Current state (where they moved TO)"},
+                "status": {"type": "string", "description": "Optional: ACTIVE, INACTIVE, or PENDING"},
+                "limit": {"type": "integer", "description": "Max results (default 25)"}
+            }, "required": ["from_state", "to_state"]}}}},
+
+        {"toolSpec": {"name": "get_move_timeline",
+            "description": "Get complete move history timeline for a customer. Use when asking about a customer's move history or previous addresses.",
+            "inputSchema": {"json": {"type": "object", "properties": {
+                "crid": {"type": "string", "description": "Customer Record ID"}
+            }, "required": ["crid"]}}}},
+
+        # ======== NEW: STATUS FILTERING TOOLS ========
+        {"toolSpec": {"name": "filter_by_status",
+            "description": "Filter customers by status (ACTIVE, INACTIVE, PENDING). Use for 'inactive customers', 'show me active customers in TX'.",
+            "inputSchema": {"json": {"type": "object", "properties": {
+                "status": {"type": "string", "description": "ACTIVE, INACTIVE, or PENDING"},
+                "state": {"type": "string", "description": "Optional two-letter state code"},
+                "limit": {"type": "integer", "description": "Max results (default 25)"}
+            }, "required": ["status"]}}}},
+
+        # ======== NEW: AGGREGATION TOOLS ========
+        {"toolSpec": {"name": "count_by_criteria",
+            "description": "Fast count of customers matching criteria. Use for 'how many inactive customers in Texas?', 'count of business customers who moved from CA'.",
+            "inputSchema": {"json": {"type": "object", "properties": {
+                "state": {"type": "string", "description": "State filter"},
+                "status": {"type": "string", "description": "ACTIVE, INACTIVE, or PENDING"},
+                "customer_type": {"type": "string", "description": "RESIDENTIAL, BUSINESS, or PO_BOX"},
+                "from_state": {"type": "string", "description": "State they moved FROM"}
+            }}}}},
+
+        {"toolSpec": {"name": "group_by_field",
+            "description": "Group and count customers by a field. Use for 'breakdown by status', 'customers per city', 'distribution by type'.",
+            "inputSchema": {"json": {"type": "object", "properties": {
+                "field": {"type": "string", "description": "Field: state, status, customer_type, move_count, city"},
+                "state": {"type": "string", "description": "Optional state filter before grouping"},
+                "status": {"type": "string", "description": "Optional status filter before grouping"}
+            }, "required": ["field"]}}}},
     ]
 
     def __init__(
@@ -542,15 +589,56 @@ QUERY INTERPRETATION:
             Tool execution result.
         """
         match name:
+            # Core tools
             case "lookup_crid":
                 return self.db.lookup(params.get("crid", ""))
             case "search_customers":
                 return self.db.search(
-                    state=params.get("state"), city=params.get("city"),
-                    min_moves=params.get("min_move_count"), limit=params.get("limit")
+                    state=params.get("state"),
+                    city=params.get("city"),
+                    status=params.get("status"),  # NEW: status filter
+                    min_moves=params.get("min_move_count"),
+                    customer_type=params.get("customer_type"),
+                    has_apartment=params.get("has_apartment"),
+                    limit=params.get("limit")
                 )
             case "get_stats":
                 return self.db.stats()
+
+            # NEW: Move history tools (THE CRITICAL FIX)
+            case "customers_moved_from":
+                return self.db.search_by_move_history(
+                    from_state=params.get("from_state"),
+                    to_state=params.get("to_state"),
+                    status=params.get("status"),
+                    limit=params.get("limit", 25)
+                )
+            case "get_move_timeline":
+                return self.db.get_move_timeline(params.get("crid", ""))
+
+            # NEW: Status filtering
+            case "filter_by_status":
+                return self.db.search(
+                    state=params.get("state"),
+                    status=params.get("status"),
+                    limit=params.get("limit", 25)
+                )
+
+            # NEW: Aggregation tools
+            case "count_by_criteria":
+                return self.db.count_by_criteria(
+                    state=params.get("state"),
+                    status=params.get("status"),
+                    customer_type=params.get("customer_type"),
+                    from_state=params.get("from_state")
+                )
+            case "group_by_field":
+                return self.db.group_by(
+                    field=params.get("field", "state"),
+                    state=params.get("state"),
+                    status=params.get("status")
+                )
+
         return {"success": False, "error": f"Unknown tool: {name}"}
 
     def get_stats(self) -> dict[str, Any]:

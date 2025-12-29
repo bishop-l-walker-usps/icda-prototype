@@ -456,6 +456,50 @@ class QueryOrchestrator:
                     preview_size=pagination_dict.get("preview_size", 15),
                 )
 
+            # =====================================================================
+            # VISIBLE COMPLEXITY CLASSIFICATION (Testing/Debug)
+            # This shows the human what the model routing decided
+            # =====================================================================
+            complexity_classification = {
+                # Query Analysis
+                "query_complexity": intent.complexity.value,
+                "primary_intent": intent.primary_intent.value,
+                "secondary_intents": [i.value for i in intent.secondary_intents] if intent.secondary_intents else [],
+                "intent_confidence": round(intent.confidence, 3),
+                
+                # Model Routing Decision
+                "model_tier": routing_decision.model_tier.value,
+                "model_id": routing_decision.model_id,
+                "routing_reason": routing_decision.reason,
+                
+                # Filters Extracted
+                "filters_extracted": {
+                    "state": parsed.filters.get("state"),
+                    "status": parsed.filters.get("status"),
+                    "origin_state": parsed.filters.get("origin_state"),
+                    "city": parsed.filters.get("city"),
+                    "min_move_count": parsed.filters.get("min_move_count"),
+                    "customer_type": parsed.filters.get("customer_type"),
+                },
+                
+                # Agent Confidences
+                "agent_confidences": {
+                    "intent": round(intent.confidence, 3),
+                    "context": round(context.context_confidence, 3),
+                    "resolver": round(resolved.resolution_confidence, 3),
+                    "search": round(search_result.search_confidence, 3),
+                    "knowledge": round(knowledge.rag_confidence, 3),
+                    "enforcer": round(enforced.quality_score, 3),
+                },
+                
+                # Search Details
+                "search_method": search_result.search_metadata.get("search_method", "standard") if search_result.search_metadata else "standard",
+                "total_results_found": search_result.total_matches,
+                
+                # Tools Suggested
+                "suggested_tools": intent.suggested_tools,
+            }
+
             return QueryResult(
                 success=True,
                 response=personality_ctx.enhanced_response,
@@ -475,6 +519,8 @@ class QueryOrchestrator:
                     "suggestions": [s.to_dict() for s in suggestion_ctx.suggestions],
                     "follow_up_prompts": suggestion_ctx.follow_up_prompts,
                     "memory_entities": len(memory.recalled_entities) if memory else 0,
+                    # VISIBLE COMPLEXITY CLASSIFICATION - Human can see this!
+                    "complexity_classification": complexity_classification,
                 },
                 token_usage=nova_response.token_usage,
                 pagination=pagination,
