@@ -25,6 +25,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 
 from .database import CustomerDB
 from .agents import QueryOrchestrator, create_query_orchestrator
+from .agents.models import AgentCoreMemoryConfig
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,7 @@ QUERY INTERPRETATION:
         download_manager=None,
         model_config: dict[str, Any] | None = None,
         cache=None,
+        agentcore_config: AgentCoreMemoryConfig | None = None,
     ):
         """Initialize NovaClient with optional 11-agent pipeline + LLM enforcer.
 
@@ -159,6 +161,7 @@ QUERY INTERPRETATION:
                 - nova_pro_model: Model ID for complex queries
                 - model_routing_threshold: Confidence threshold for escalation
             cache: Optional RedisCache for memory storage.
+            agentcore_config: Optional AgentCore memory configuration.
         """
         self.model = model
         self.db = db
@@ -200,6 +203,7 @@ QUERY INTERPRETATION:
                         download_manager=download_manager,
                         config=model_config,  # Pass model routing config
                         cache=cache,  # Pass cache for memory storage
+                        agentcore_config=agentcore_config,  # Pass AgentCore memory config
                     )
                     enforcer_status = f"with {llm_enforcer.client.provider}" if (llm_enforcer and llm_enforcer.available) else "without enforcer"
                     logger.info(f"Nova: 11-agent orchestrator enabled ({enforcer_status})")

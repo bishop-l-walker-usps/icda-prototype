@@ -94,6 +94,22 @@ class Config:
         default_factory=lambda: _parse_int(getenv("ENFORCER_VALIDATION_INTERVAL", ""), 6)
     )
 
+    # ==================== AgentCore Memory (optional - empty = local fallback) ====================
+    agentcore_memory_id: str = field(default_factory=lambda: getenv("AGENTCORE_MEMORY_ID", ""))
+    agentcore_region: str = field(default_factory=lambda: getenv("AGENTCORE_REGION", "us-west-2"))
+    agentcore_enabled: bool = field(
+        default_factory=lambda: _parse_bool(getenv("AGENTCORE_ENABLED", ""), True)
+    )
+    agentcore_use_ltm: bool = field(
+        default_factory=lambda: _parse_bool(getenv("AGENTCORE_USE_LTM", ""), True)
+    )
+    agentcore_stm_retention_days: int = field(
+        default_factory=lambda: _parse_int(getenv("AGENTCORE_STM_RETENTION_DAYS", ""), 7)
+    )
+    agentcore_ltm_retention_days: int = field(
+        default_factory=lambda: _parse_int(getenv("AGENTCORE_LTM_RETENTION_DAYS", ""), 30)
+    )
+
     # ==================== Feature Flags ====================
     enable_federation: bool = field(
         default_factory=lambda: _parse_bool(getenv("ENABLE_FEDERATION", ""), True)
@@ -106,6 +122,9 @@ class Config:
     )
     admin_enabled: bool = field(
         default_factory=lambda: _parse_bool(getenv("ADMIN_ENABLED", ""), True)
+    )
+    enable_agentcore_memory: bool = field(
+        default_factory=lambda: _parse_bool(getenv("ENABLE_AGENTCORE_MEMORY", ""), True)
     )
 
     def get_index_config(self) -> dict[str, str]:
@@ -137,6 +156,21 @@ class Config:
     def is_opensearch_available(self) -> bool:
         """Check if OpenSearch is configured."""
         return bool(self.opensearch_host)
+
+    def is_agentcore_available(self) -> bool:
+        """Check if AgentCore Memory is configured."""
+        return bool(self.agentcore_memory_id and self.enable_agentcore_memory)
+
+    def get_agentcore_config(self) -> dict:
+        """Get AgentCore memory configuration dict."""
+        return {
+            "memory_id": self.agentcore_memory_id if self.agentcore_memory_id else None,
+            "region": self.agentcore_region,
+            "use_ltm": self.agentcore_use_ltm,
+            "stm_retention_days": self.agentcore_stm_retention_days,
+            "ltm_retention_days": self.agentcore_ltm_retention_days,
+            "enabled": self.enable_agentcore_memory,
+        }
 
 
 cfg = Config()

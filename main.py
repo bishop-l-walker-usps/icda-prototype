@@ -50,6 +50,7 @@ from icda.address_completer import NovaAddressCompleter
 from icda.address_pipeline import AddressPipeline
 from icda.address_router import router as address_router, configure_router
 from icda.agents.orchestrator import AddressAgentOrchestrator
+from icda.agents.models import AgentCoreMemoryConfig
 from icda.indexes.zip_database import ZipDatabase
 from icda.indexes.address_vector_index import AddressVectorIndex
 
@@ -420,6 +421,16 @@ async def lifespan(app: FastAPI):
     }
     print(f"  Model routing: micro={cfg.nova_model}, lite={cfg.nova_lite_model}, pro={cfg.nova_pro_model}")
 
+    # Create AgentCore memory configuration
+    agentcore_config = AgentCoreMemoryConfig(
+        memory_id=cfg.agentcore_memory_id if cfg.agentcore_memory_id else None,
+        region=cfg.agentcore_region,
+        use_ltm=cfg.agentcore_use_ltm,
+        stm_retention_days=cfg.agentcore_stm_retention_days,
+        ltm_retention_days=cfg.agentcore_ltm_retention_days,
+        enabled=cfg.enable_agentcore_memory,
+    )
+
     _nova = NovaClient(
         region=cfg.aws_region,
         model=cfg.nova_model,
@@ -433,14 +444,18 @@ async def lifespan(app: FastAPI):
         download_manager=_download_manager,  # Pass download manager for pagination
         model_config=model_config,  # Pass model routing config
         cache=_cache,  # Pass cache for memory storage
+        agentcore_config=agentcore_config,  # Pass AgentCore memory config
     )
     if _nova.available:
         if _nova.orchestrator:
             enforcer_status = f" + {llm_client.provider} enforcer" if _enforcer.available else ""
             memory_status = "enabled" if _nova.orchestrator._memory_agent.available else "disabled"
+            agentcore_status = "enabled" if agentcore_config.enabled else "disabled"
             print(f"  Nova AI: enabled with 11-agent orchestrator{enforcer_status}")
             print(f"    - KnowledgeAgent: {'enabled' if _nova.orchestrator._knowledge_agent.available else 'disabled'}")
             print(f"    - MemoryAgent: {memory_status}")
+            print(f"    - UnifiedMemoryLayer: {agentcore_status} (AgentCore)")
+            print(f"    - EnforcerCoordinator: enabled (5 memory enforcers)")
             print(f"    - PersonalityAgent: Witty Expert")
         else:
             print(f"  Nova AI: enabled (simple mode)")

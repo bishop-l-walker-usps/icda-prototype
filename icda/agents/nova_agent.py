@@ -34,6 +34,7 @@ from .models import (
     PersonalityConfig,
     PersonalityStyle,
     MemoryContext,
+    UnifiedMemoryContext,
 )
 from .tool_registry import ToolRegistry
 
@@ -151,6 +152,7 @@ When relevant, reference this context naturally in your response."""
         model_override: str | None = None,
         memory: MemoryContext | None = None,
         enable_tools: bool = True,
+        unified_memory: UnifiedMemoryContext | None = None,
     ) -> NovaResponse:
         """Generate AI response with dynamic tools.
 
@@ -163,6 +165,7 @@ When relevant, reference this context naturally in your response."""
             model_override: Optional model ID to use instead of default.
             memory: Optional memory context for entity recall.
             enable_tools: Whether to enable Nova tool calling.
+            unified_memory: Optional unified memory context with LTM facts.
 
         Returns:
             NovaResponse with generated text.
@@ -189,8 +192,8 @@ When relevant, reference this context naturally in your response."""
             # Build minimal context from search (no knowledge)
             rag_context = self._build_context(search_result, knowledge)
 
-            # Build dynamic system prompt with personality and memory
-            system_prompt = self._build_dynamic_prompt(memory)
+            # Build dynamic system prompt with personality, memory, and LTM facts
+            system_prompt = self._build_dynamic_prompt(memory, unified_memory)
 
             # Get tools from registry based on intent (if enabled)
             # Tools allow Nova to fetch additional data during response generation
@@ -235,11 +238,13 @@ When relevant, reference this context naturally in your response."""
     def _build_dynamic_prompt(
         self,
         memory: MemoryContext | None = None,
+        unified_memory: UnifiedMemoryContext | None = None,
     ) -> str:
-        """Build dynamic system prompt with personality and memory.
+        """Build dynamic system prompt with personality, memory, and LTM facts.
 
         Args:
-            memory: Optional memory context.
+            memory: Optional memory context (local).
+            unified_memory: Optional unified memory with AgentCore LTM facts.
 
         Returns:
             Complete system prompt string.
@@ -284,6 +289,38 @@ When relevant, reference this context naturally in your response."""
                 parts.append(
                     self.MEMORY_CONTEXT_TEMPLATE.format(memory_context=memory_context)
                 )
+
+        # Add LTM facts from unified memory (AgentCore integration)
+        if unified_memory and unified_memory.ltm_facts:
+            ltm_lines = []
+            for fact in unified_memory.ltm_facts[:5]:  # Limit to top 5 facts
+                if hasattr(fact, 'content') and fact.content:
+                    ltm_lines.append(f"- {fact.content}")
+
+            if ltm_lines:
+                ltm_context = "\n".join(ltm_lines)
+                parts.append(f"""
+LONG-TERM MEMORY FACTS (from previous conversations):
+{ltm_context}
+Use these facts naturally if relevant to the current query.""")
+
+        # Add user preferences from unified memory
+        if unified_memory and unified_memory.ltm_preferences:
+            pref_lines = []
+            for key, value in list(unified_memory.ltm_preferences.items())[:3]:
+                pref_lines.append(f"- {key}: {value}")
+
+            if pref_lines:
+                pref_context = "\n".join(pref_lines)
+                parts.append(f"""
+USER PREFERENCES:
+{pref_context}""")
+
+        # Add session summary if available
+        if unified_memory and unified_memory.session_summary:
+            parts.append(f"""
+SESSION CONTEXT:
+{unified_memory.session_summary}""")
 
         return "\n".join(parts)
 

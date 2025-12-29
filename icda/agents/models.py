@@ -183,6 +183,174 @@ class MemoryContext:
         }
 
 
+# ============================================================================
+# Bedrock AgentCore Memory Dataclasses
+# ============================================================================
+
+class MemoryNamespace(str, Enum):
+    """Namespace patterns for AgentCore memory organization."""
+    FACTS = "/icda/facts/{actorId}"
+    PREFERENCES = "/icda/preferences/{actorId}"
+    SUMMARIES = "/icda/summaries/{actorId}/{sessionId}"
+    ENTITIES = "/icda/entities/{actorId}"
+
+
+@dataclass(slots=True)
+class MemoryFact:
+    """A fact extracted from conversation by AgentCore SemanticStrategy.
+
+    Attributes:
+        fact_id: Unique identifier for the fact.
+        content: The extracted fact content.
+        source_query: Query that generated this fact.
+        confidence: Extraction confidence score.
+        timestamp: When the fact was extracted.
+        category: Category of fact (customer, location, preference, etc.).
+        relevance_score: Relevance to current query (from semantic search).
+    """
+    fact_id: str
+    content: str
+    source_query: str = ""
+    confidence: float = 0.8
+    timestamp: float = 0.0
+    category: str = "general"
+    relevance_score: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "fact_id": self.fact_id,
+            "content": self.content,
+            "source_query": self.source_query,
+            "confidence": self.confidence,
+            "timestamp": self.timestamp,
+            "category": self.category,
+            "relevance_score": self.relevance_score,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "MemoryFact":
+        """Create from dictionary."""
+        return cls(
+            fact_id=data.get("fact_id", data.get("id", "")),
+            content=data.get("content", ""),
+            source_query=data.get("source_query", data.get("source", "")),
+            confidence=data.get("confidence", 0.8),
+            timestamp=data.get("timestamp", 0.0),
+            category=data.get("category", "general"),
+            relevance_score=data.get("relevance_score", data.get("score", 0.0)),
+        )
+
+
+@dataclass(slots=True)
+class AgentCoreMemoryConfig:
+    """Configuration for AWS Bedrock AgentCore Memory.
+
+    Attributes:
+        memory_id: AgentCore memory resource ID.
+        region: AWS region for AgentCore.
+        use_ltm: Whether to use long-term memory (async extraction).
+        stm_retention_days: Short-term memory retention.
+        ltm_retention_days: Long-term memory retention.
+        extraction_delay_seconds: Expected delay for LTM extraction.
+        enabled: Whether AgentCore memory is enabled.
+    """
+    memory_id: str | None = None
+    region: str = "us-west-2"
+    use_ltm: bool = True
+    stm_retention_days: int = 7
+    ltm_retention_days: int = 30
+    extraction_delay_seconds: int = 10
+    enabled: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "memory_id": self.memory_id,
+            "region": self.region,
+            "use_ltm": self.use_ltm,
+            "stm_retention_days": self.stm_retention_days,
+            "ltm_retention_days": self.ltm_retention_days,
+            "extraction_delay_seconds": self.extraction_delay_seconds,
+            "enabled": self.enabled,
+        }
+
+
+@dataclass(slots=True)
+class UnifiedMemoryContext:
+    """Unified memory context combining local and AgentCore memory.
+
+    This is the primary memory context passed to ALL 11 agents in the pipeline.
+    Provides backward compatibility with existing MemoryContext while adding
+    AgentCore STM (short-term) and LTM (long-term) capabilities.
+
+    Attributes:
+        local_context: Legacy MemoryContext for backward compatibility.
+        stm_turns: Short-term memory conversation turns (instant retrieval).
+        stm_loaded: Whether STM was successfully loaded.
+        ltm_facts: Long-term memory facts (from SemanticStrategy).
+        ltm_preferences: User preferences (from UserPreferenceStrategy).
+        session_summary: Session summary (from SummaryStrategy).
+        ltm_loaded: Whether LTM was successfully loaded.
+        memory_source: Source of memory ("local", "agentcore", "hybrid").
+        agentcore_available: Whether AgentCore service is available.
+        recall_confidence: Overall confidence in memory recall.
+        memory_signals: Debug signals about memory operations.
+    """
+    local_context: MemoryContext = field(default_factory=MemoryContext)
+    stm_turns: list[dict[str, Any]] = field(default_factory=list)
+    stm_loaded: bool = False
+    ltm_facts: list[MemoryFact] = field(default_factory=list)
+    ltm_preferences: dict[str, Any] = field(default_factory=dict)
+    session_summary: str = ""
+    ltm_loaded: bool = False
+    memory_source: str = "local"
+    agentcore_available: bool = False
+    recall_confidence: float = 0.0
+    memory_signals: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary representation."""
+        return {
+            "local_context": self.local_context.to_dict() if self.local_context else {},
+            "stm_turns_count": len(self.stm_turns),
+            "stm_loaded": self.stm_loaded,
+            "ltm_facts_count": len(self.ltm_facts),
+            "ltm_facts": [f.to_dict() for f in self.ltm_facts],
+            "ltm_preferences": self.ltm_preferences,
+            "session_summary": self.session_summary[:100] if self.session_summary else "",
+            "ltm_loaded": self.ltm_loaded,
+            "memory_source": self.memory_source,
+            "agentcore_available": self.agentcore_available,
+            "recall_confidence": self.recall_confidence,
+            "memory_signals": self.memory_signals,
+        }
+
+    @property
+    def has_memory(self) -> bool:
+        """Check if any memory is available."""
+        return (
+            self.stm_loaded
+            or self.ltm_loaded
+            or bool(self.local_context.recalled_entities)
+        )
+
+    @property
+    def active_customer(self) -> MemoryEntity | None:
+        """Get active customer from local context for backward compatibility."""
+        return self.local_context.active_customer if self.local_context else None
+
+    @property
+    def active_location(self) -> dict[str, str] | None:
+        """Get active location from local context for backward compatibility."""
+        return self.local_context.active_location if self.local_context else None
+
+    @property
+    def resolved_pronouns(self) -> dict[str, str]:
+        """Get resolved pronouns from local context for backward compatibility."""
+        return self.local_context.resolved_pronouns if self.local_context else {}
+
+
 @dataclass(slots=True)
 class Suggestion:
     """A single suggestion for query improvement.

@@ -42,6 +42,8 @@ from .models import (
     PersonalityContext,
     SuggestionContext,
     EscalationContext,
+    UnifiedMemoryContext,
+    AgentCoreMemoryConfig,
 )
 from .tool_registry import ToolRegistry, create_default_registry
 from .model_router import ModelRouter
@@ -57,6 +59,8 @@ from .memory_agent import MemoryAgent
 from .personality_agent import PersonalityAgent
 from .suggestion_agent import SuggestionAgent
 from .failure_tracker import FailureTracker
+from .agentcore_memory import UnifiedMemoryLayer, MemoryHooks
+from .enforcers import EnforcerCoordinator
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +100,10 @@ class QueryOrchestrator:
         "_personality_config",
         "_cache",
         "_failure_tracker",
+        "_unified_memory_layer",
+        "_memory_hooks",
+        "_enforcer_coordinator",
+        "_agentcore_config",
     )
 
     def __init__(
@@ -112,6 +120,7 @@ class QueryOrchestrator:
         config: dict[str, Any] | None = None,
         download_manager=None,
         cache=None,
+        agentcore_config: AgentCoreMemoryConfig | None = None,
     ):
         """Initialize QueryOrchestrator with all agents.
 
@@ -128,11 +137,13 @@ class QueryOrchestrator:
             config: Optional configuration overrides.
             download_manager: Optional DownloadTokenManager for pagination.
             cache: Optional RedisCache for memory storage.
+            agentcore_config: Optional AgentCore memory configuration.
         """
         self._config = config or {}
         self._session_store = session_store
         self._download_manager = download_manager
         self._cache = cache
+        self._agentcore_config = agentcore_config or AgentCoreMemoryConfig()
 
         # Create model router with configuration
         lite_model = self._config.get("nova_lite_model", "us.amazon.nova-lite-v1:0")
@@ -180,6 +191,14 @@ class QueryOrchestrator:
         self._suggestion_agent = SuggestionAgent()
         self._failure_tracker = FailureTracker(cache=cache)
 
+        # Initialize unified memory layer and hooks (AgentCore integration)
+        self._unified_memory_layer = UnifiedMemoryLayer(
+            config=self._agentcore_config,
+            local_memory=self._memory_agent,
+        )
+        self._memory_hooks = MemoryHooks(self._unified_memory_layer)
+        self._enforcer_coordinator = EnforcerCoordinator(enabled=True)
+
         # Log initialization with enforcer status
         enforcer_status = f"enabled ({llm_enforcer.client.provider})" if (llm_enforcer and llm_enforcer.available) else "disabled"
         logger.info(
@@ -187,6 +206,8 @@ class QueryOrchestrator:
         )
         logger.info(f"Model routing: micro={model}, lite={lite_model}, pro={pro_model}, threshold={threshold}")
         logger.info("New agents: MemoryAgent, PersonalityAgent (Witty Expert), SuggestionAgent")
+        agentcore_status = "enabled" if self._agentcore_config.enabled else "disabled"
+        logger.info(f"AgentCore memory: {agentcore_status}, EnforcerCoordinator: enabled")
 
     @property
     def available(self) -> bool:
@@ -224,8 +245,17 @@ class QueryOrchestrator:
         """
         start_time = time.time()
         trace = PipelineTrace() if trace_enabled else None
+        unified_memory: UnifiedMemoryContext | None = None
 
         try:
+            # Load unified memory context at pipeline start (AgentCore integration)
+            actor_id = session_id or "anonymous"
+            unified_memory = await self._memory_hooks.on_pipeline_start(
+                session_id=session_id or "",
+                query=query,
+                actor_id=actor_id,
+            )
+
             # Stage 1: Intent Classification
             intent = await self._run_stage(
                 "intent",
@@ -233,9 +263,10 @@ class QueryOrchestrator:
                 trace,
             )
 
-            # Stage 2: Memory Recall (NEW)
-            # Recall entities from working memory for pronoun resolution
-            memory = await self._run_stage(
+            # Stage 2: Memory Recall (Enhanced with Unified Memory)
+            # Use unified memory local_context for backward compatibility
+            # The unified memory was loaded at pipeline start with AgentCore data
+            memory = unified_memory.local_context if unified_memory else await self._run_stage(
                 "memory",
                 lambda: self._memory_agent.recall(
                     session_id=session_id,
@@ -244,6 +275,22 @@ class QueryOrchestrator:
                 ),
                 trace,
             )
+
+            # Record memory stage in trace if using unified memory
+            if unified_memory and trace:
+                trace.add_stage(
+                    agent="memory",
+                    output={
+                        "recalled_entities": len(unified_memory.local_context.recalled_entities),
+                        "memory_source": unified_memory.memory_source,
+                        "agentcore_available": unified_memory.agentcore_available,
+                        "stm_turns": len(unified_memory.stm_turns),
+                        "ltm_facts": len(unified_memory.ltm_facts),
+                    },
+                    time_ms=0,  # Already loaded at pipeline start
+                    success=True,
+                    confidence=unified_memory.recall_confidence,
+                )
 
             # Stage 3: Context Extraction (enhanced with memory)
             context = await self._run_stage(
@@ -337,11 +384,12 @@ class QueryOrchestrator:
                     intent=intent,
                     model_override=routing_decision.model_id,
                     memory=memory,
+                    unified_memory=unified_memory,  # Pass unified memory with LTM facts
                 ),
                 trace,
             )
 
-            # Stage 9: Enforcement
+            # Stage 9: Enforcement (Standard EnforcerAgent)
             enforced = await self._run_stage(
                 "enforcer",
                 lambda: self._enforcer_agent.enforce(
@@ -352,6 +400,47 @@ class QueryOrchestrator:
                 ),
                 trace,
             )
+
+            # Stage 9b: Enforcer Coordinator (5 Memory Enforcers)
+            # Run all 5 memory enforcers to validate memory integration
+            enforcer_coord_result = await self._enforcer_coordinator.enforce({
+                "unified_memory": unified_memory,
+                "session_id": session_id,
+                "actor_id": actor_id,
+                "query": query,
+                "parsed_query": parsed,
+                "search_result": search_result,
+                "nova_response": nova_response,
+                "enforced_response": enforced,
+                "agentcore_available": unified_memory.agentcore_available if unified_memory else False,
+                "response_generated": True,
+            })
+
+            # Log enforcer coordinator results
+            if not enforcer_coord_result["passed"]:
+                logger.warning(
+                    f"EnforcerCoordinator gates failed: "
+                    f"{enforcer_coord_result['metrics'].get('total_gates_failed', 0)} gates, "
+                    f"quality={enforcer_coord_result['quality_score']:.2f}"
+                )
+                # Add recommendations to response metadata
+                if enforcer_coord_result.get("recommendations"):
+                    logger.info(f"Recommendations: {enforcer_coord_result['recommendations']}")
+
+            # Record enforcer coordinator in trace
+            if trace:
+                trace.add_stage(
+                    agent="enforcer_coordinator",
+                    output={
+                        "passed": enforcer_coord_result["passed"],
+                        "quality_score": enforcer_coord_result["quality_score"],
+                        "enforcers_run": enforcer_coord_result["metrics"].get("enforcers_run", 0),
+                        "enforcers_passed": enforcer_coord_result["metrics"].get("enforcers_passed", 0),
+                    },
+                    time_ms=enforcer_coord_result["metrics"].get("enforcement_time_ms", 0),
+                    success=enforcer_coord_result["passed"],
+                    confidence=enforcer_coord_result["quality_score"],
+                )
 
             # Track failures or clear on success (wrong answer prevention)
             strategies_tried = [search_result.strategy_used.value]
@@ -401,14 +490,17 @@ class QueryOrchestrator:
                 trace,
             )
 
-            # Async: Store entities to memory for future recall (non-blocking)
-            if session_id and self._memory_agent.available:
+            # Store memory at pipeline end (AgentCore integration)
+            # This stores to both local memory and AgentCore (STM + LTM extraction)
+            if session_id:
                 asyncio.create_task(
-                    self._memory_agent.remember(
+                    self._memory_hooks.on_pipeline_end(
                         session_id=session_id,
-                        results=search_result.results,
-                        response=personality_ctx.enhanced_response,
                         query=query,
+                        response=personality_ctx.enhanced_response,
+                        actor_id=actor_id,
+                        search_results=search_result.results,
+                        parsed_query=parsed,
                     )
                 )
 
@@ -519,6 +611,22 @@ class QueryOrchestrator:
                     "suggestions": [s.to_dict() for s in suggestion_ctx.suggestions],
                     "follow_up_prompts": suggestion_ctx.follow_up_prompts,
                     "memory_entities": len(memory.recalled_entities) if memory else 0,
+                    # Unified Memory (AgentCore integration)
+                    "unified_memory": {
+                        "source": unified_memory.memory_source if unified_memory else "none",
+                        "agentcore_available": unified_memory.agentcore_available if unified_memory else False,
+                        "stm_turns": len(unified_memory.stm_turns) if unified_memory else 0,
+                        "ltm_facts": len(unified_memory.ltm_facts) if unified_memory else 0,
+                        "recall_confidence": unified_memory.recall_confidence if unified_memory else 0.0,
+                    },
+                    # Enforcer Coordinator (5 memory enforcers)
+                    "enforcer_coordinator": {
+                        "passed": enforcer_coord_result["passed"],
+                        "quality_score": enforcer_coord_result["quality_score"],
+                        "enforcers_run": enforcer_coord_result["metrics"].get("enforcers_run", 0),
+                        "enforcers_passed": enforcer_coord_result["metrics"].get("enforcers_passed", 0),
+                        "recommendations": enforcer_coord_result.get("recommendations", []),
+                    },
                     # VISIBLE COMPLEXITY CLASSIFICATION - Human can see this!
                     "complexity_classification": complexity_classification,
                 },
@@ -790,6 +898,17 @@ class QueryOrchestrator:
                 "humor_enabled": self._personality_config.humor_enabled,
             },
             "memory_stats": self._memory_agent.get_stats() if self._memory_agent.available else {},
+            # Unified Memory Layer (AgentCore integration)
+            "unified_memory_layer": {
+                "available": self._unified_memory_layer.available,
+                "config": {
+                    "enabled": self._agentcore_config.enabled,
+                    "use_ltm": self._agentcore_config.use_ltm,
+                    "region": self._agentcore_config.region,
+                },
+            },
+            # Enforcer Coordinator (5 memory enforcers)
+            "enforcer_coordinator": self._enforcer_coordinator.get_stats(),
         }
 
 
@@ -806,6 +925,7 @@ def create_query_orchestrator(
     config: dict[str, Any] | None = None,
     download_manager=None,
     cache=None,
+    agentcore_config: AgentCoreMemoryConfig | None = None,
 ) -> QueryOrchestrator:
     """Factory function to create a QueryOrchestrator.
 
@@ -822,6 +942,7 @@ def create_query_orchestrator(
         config: Optional configuration dict for model routing settings.
         download_manager: Optional DownloadTokenManager for pagination.
         cache: Optional RedisCache for memory storage.
+        agentcore_config: Optional AgentCore memory configuration.
 
     Returns:
         Configured QueryOrchestrator instance.
@@ -839,4 +960,5 @@ def create_query_orchestrator(
         config=config,
         download_manager=download_manager,
         cache=cache,
+        agentcore_config=agentcore_config,
     )

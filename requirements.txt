@@ -8,6 +8,11 @@ python-multipart==0.0.9
 # AWS (optional - for AI features)
 boto3==1.35.86
 
+# AWS Bedrock AgentCore Memory (optional - for advanced memory features)
+# bedrock-agentcore>=0.1.0
+# bedrock-agentcore-starter-toolkit>=0.1.0
+# Note: Uncomment when packages are available. Until then, local fallback is used.
+
 # Redis (for distributed caching)
 redis[hiredis]==5.2.1
 
