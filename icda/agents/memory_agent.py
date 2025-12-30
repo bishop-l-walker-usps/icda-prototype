@@ -46,6 +46,35 @@ REFERENCE_PRONOUNS = {
     "again", "more like that", "similar",
 }
 
+# Patterns for extracting user facts from queries
+USER_FACT_PATTERNS = {
+    # Name patterns: "My name is X", "I'm X", "Call me X", "I am X"
+    "name": [
+        r"(?:my name is|i'?m|i am|call me|this is)\s+([a-z][a-z\-']+)",
+        r"^([a-z][a-z\-']+)\s+here",  # "Bishop here"
+    ],
+    # Preference patterns
+    "prefers_detail": [
+        r"(?:give me|show me|i want|prefer)\s+(?:more\s+)?detail",
+        r"be\s+(?:more\s+)?(?:detailed|verbose)",
+    ],
+    "prefers_brief": [
+        r"(?:keep it|be)\s+(?:brief|short|concise)",
+        r"(?:just|only)\s+(?:the\s+)?(?:summary|highlights)",
+    ],
+}
+
+# Questions that should trigger fact recall
+USER_FACT_QUERIES = {
+    "name": [
+        r"what(?:'s| is)\s+my\s+name",
+        r"who\s+am\s+i",
+        r"do you (?:know|remember)\s+(?:my\s+)?(?:name|who i am)",
+        r"what do you call me",
+        r"remember\s+(?:my\s+)?name",
+    ],
+}
+
 
 class MemoryAgent:
     """Agent for managing working memory within a session.
@@ -119,6 +148,11 @@ class MemoryAgent:
         if resolved_pronouns:
             signals.append(f"resolved_{len(resolved_pronouns)}_pronouns")
 
+        # Check if query is asking about a stored fact
+        recalled_facts = self._check_fact_query(query_lower, entities)
+        if recalled_facts:
+            signals.append(f"recalled_facts:{list(recalled_facts.keys())}")
+
         # Find active customer (most recently discussed)
         active_customer = self._find_active_customer(query_lower, entities)
         if active_customer:
@@ -131,11 +165,17 @@ class MemoryAgent:
 
         # Extract user preferences from memory
         user_preferences = self._extract_preferences(entities)
+        # Merge in recalled facts as preferences (for downstream access)
+        if recalled_facts:
+            user_preferences.update(recalled_facts)
 
         # Calculate recall confidence
         confidence = self._calculate_confidence(
             entities, resolved_pronouns, active_customer
         )
+        # Boost confidence if we recalled facts
+        if recalled_facts:
+            confidence = min(confidence + 0.2, 1.0)
 
         return MemoryContext(
             recalled_entities=entities,
@@ -162,29 +202,44 @@ class MemoryAgent:
             response: Generated response.
             query: Original query.
         """
-        if not session_id or not results:
+        if not session_id:
             return
 
         # Load existing entities
         entities = await self._load_entities(session_id)
         now = time.time()
 
-        # Extract new entities from results
-        new_entities = self._extract_entities(results, now)
-
-        # Merge with existing (update if exists, add if new)
+        # Build entity map for merging
         entity_map = {e.entity_id: e for e in entities}
-        for new_entity in new_entities:
-            if new_entity.entity_id in entity_map:
-                # Update existing entity
-                existing = entity_map[new_entity.entity_id]
+
+        # Extract user facts from query (name, preferences) - ALWAYS do this
+        user_facts = self._extract_user_facts(query, now)
+        for fact_entity in user_facts:
+            if fact_entity.entity_id in entity_map:
+                # Update existing fact
+                existing = entity_map[fact_entity.entity_id]
                 existing.last_accessed = now
                 existing.mention_count += 1
-                # Merge attributes
-                existing.attributes.update(new_entity.attributes)
+                # Update value if changed
+                existing.canonical_name = fact_entity.canonical_name
+                existing.attributes.update(fact_entity.attributes)
             else:
-                # Add new entity
-                entity_map[new_entity.entity_id] = new_entity
+                entity_map[fact_entity.entity_id] = fact_entity
+
+        # Extract entities from search results (if any)
+        if results:
+            new_entities = self._extract_entities(results, now)
+            for new_entity in new_entities:
+                if new_entity.entity_id in entity_map:
+                    # Update existing entity
+                    existing = entity_map[new_entity.entity_id]
+                    existing.last_accessed = now
+                    existing.mention_count += 1
+                    # Merge attributes
+                    existing.attributes.update(new_entity.attributes)
+                else:
+                    # Add new entity
+                    entity_map[new_entity.entity_id] = new_entity
 
         # Extract location entity from query/response if present
         location_entity = self._extract_location_entity(query, response, now)
@@ -447,6 +502,85 @@ class MemoryAgent:
             )
 
         return None
+
+    def _extract_user_facts(
+        self,
+        query: str,
+        timestamp: float,
+    ) -> list[MemoryEntity]:
+        """Extract user facts from query (name, preferences, etc).
+
+        Args:
+            query: Original query.
+            timestamp: Current timestamp.
+
+        Returns:
+            List of user fact MemoryEntity objects.
+        """
+        facts = []
+        query_lower = query.lower()
+
+        for fact_type, patterns in USER_FACT_PATTERNS.items():
+            for pattern in patterns:
+                match = re.search(pattern, query_lower)
+                if match:
+                    # For name, extract the captured group
+                    if fact_type == "name" and match.groups():
+                        value = match.group(1).strip().title()
+                    else:
+                        # For boolean preferences
+                        value = "true"
+
+                    entity = MemoryEntity(
+                        entity_id=f"user_fact:{fact_type}",
+                        entity_type="user_fact",
+                        canonical_name=value,
+                        aliases=[],
+                        attributes={"fact_type": fact_type, "value": value},
+                        first_mentioned=timestamp,
+                        last_accessed=timestamp,
+                        mention_count=1,
+                        confidence=0.95,
+                    )
+                    facts.append(entity)
+                    logger.debug(f"Extracted user fact: {fact_type}={value}")
+                    break  # Only extract first match per fact type
+
+        return facts
+
+    def _check_fact_query(
+        self,
+        query: str,
+        entities: list[MemoryEntity],
+    ) -> dict[str, str]:
+        """Check if query is asking about a stored fact and return it.
+
+        Args:
+            query: Lowercase query.
+            entities: Available entities.
+
+        Returns:
+            Dict of fact_type -> value for matching facts.
+        """
+        recalled_facts = {}
+        query_lower = query.lower()
+
+        for fact_type, patterns in USER_FACT_QUERIES.items():
+            for pattern in patterns:
+                if re.search(pattern, query_lower):
+                    # Find the stored fact
+                    for entity in entities:
+                        if (
+                            entity.entity_type == "user_fact"
+                            and entity.attributes.get("fact_type") == fact_type
+                        ):
+                            recalled_facts[fact_type] = entity.attributes.get(
+                                "value", entity.canonical_name
+                            )
+                            break
+                    break
+
+        return recalled_facts
 
     def _prune_memory(
         self,

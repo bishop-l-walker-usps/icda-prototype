@@ -284,6 +284,14 @@ When relevant, reference this context naturally in your response."""
                 for pronoun, entity_id in list(memory.resolved_pronouns.items())[:2]:
                     memory_lines.append(f"- '{pronoun}' refers to: {entity_id}")
 
+            # Add user preferences and facts (including name!)
+            if memory.user_preferences:
+                for key, value in memory.user_preferences.items():
+                    if key == "name":
+                        memory_lines.append(f"- User's name: {value}")
+                    else:
+                        memory_lines.append(f"- User preference - {key}: {value}")
+
             if memory_lines:
                 memory_context = "\n".join(memory_lines)
                 parts.append(

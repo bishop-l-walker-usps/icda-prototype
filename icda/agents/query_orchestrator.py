@@ -493,16 +493,18 @@ class QueryOrchestrator:
             # Store memory at pipeline end (AgentCore integration)
             # This stores to both local memory and AgentCore (STM + LTM extraction)
             if session_id:
-                asyncio.create_task(
-                    self._memory_hooks.on_pipeline_end(
+                try:
+                    # Wait for memory storage to complete (debug: was async, now sync to catch errors)
+                    await self._memory_hooks.on_pipeline_end(
                         session_id=session_id,
                         query=query,
                         response=personality_ctx.enhanced_response,
+                        results=search_result.results,
                         actor_id=actor_id,
-                        search_results=search_result.results,
-                        parsed_query=parsed,
                     )
-                )
+                    logger.info(f"Memory stored for session: {session_id}")
+                except Exception as e:
+                    logger.error(f"Memory storage failed: {e}")
 
             # Calculate total time
             total_ms = int((time.time() - start_time) * 1000)
