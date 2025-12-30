@@ -58,7 +58,20 @@ CRITICAL RULES:
 4. Never reveal SSN, financial, or health data
 5. Maintain conversation context - reference prior exchanges when relevant
 
-Interpret queries flexibly (e.g., "Nevada folks" = state NV)."""
+IMPORTANT - CUSTOMER DATA CONTEXT:
+- ALL queries are about CUSTOMER DATA in your database - never about demographics or census
+- When users ask "how many people/folks/residents in [state]" they mean CUSTOMERS in that state
+- "Population" questions always refer to your customer population, not census data
+- You have customer records with names, addresses, move history, and status
+- Answer questions about customers - count them, list them, analyze their data
+
+CONVERSATION MEMORY:
+- If the user introduces themselves (e.g., "my name is Bishop"), REMEMBER it for the session
+- When asked "what's my name" or similar, recall from conversation history - not the database
+- Personal questions about the USER (not customers) should be answered from chat context
+- This is NOT a privacy violation - you're recalling what the user told you about themselves
+
+Interpret queries flexibly (e.g., "Nevada folks" = Nevada customers)."""
 
     # Personality prompts for different styles
     PERSONALITY_PROMPTS = {

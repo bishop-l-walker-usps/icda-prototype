@@ -169,6 +169,13 @@ class MemoryAgent:
         if recalled_facts:
             user_preferences.update(recalled_facts)
 
+        # Find user facts (like remembered name)
+        user_facts = self._find_user_facts(query_lower, entities)
+        if user_facts:
+            signals.append(f"user_facts:{list(user_facts.keys())}")
+            # Add user facts to preferences for easy access
+            user_preferences.update({"user_facts": user_facts})
+
         # Calculate recall confidence
         confidence = self._calculate_confidence(
             entities, resolved_pronouns, active_customer
@@ -419,6 +426,32 @@ class MemoryAgent:
             preferences.update(pref.attributes)
 
         return preferences
+
+    def _find_user_facts(
+        self,
+        query: str,
+        entities: list[MemoryEntity],
+    ) -> dict[str, str]:
+        """Find user facts from memory.
+
+        Args:
+            query: Lowercase query.
+            entities: All memory entities.
+
+        Returns:
+            Dict of fact_type to value.
+        """
+        facts = {}
+
+        # Find user_fact entities
+        user_fact_entities = [e for e in entities if e.entity_type == "user_fact"]
+        for entity in user_fact_entities:
+            fact_type = entity.attributes.get("fact_type")
+            value = entity.attributes.get("value")
+            if fact_type and value:
+                facts[fact_type] = value
+
+        return facts
 
     def _extract_entities(
         self,
