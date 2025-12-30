@@ -85,26 +85,6 @@ class KnowledgeAgent:
             rag_confidence=confidence,
         )
 
-    def _should_augment(self, intent: IntentResult) -> bool:
-        """Determine if knowledge augmentation would be helpful.
-
-        Args:
-            intent: Intent classification.
-
-        Returns:
-            True if RAG would be helpful.
-        """
-        # Augment for complex analysis or recommendation queries
-        from icda.classifier import QueryIntent, QueryComplexity
-
-        if intent.complexity == QueryComplexity.COMPLEX:
-            return True
-
-        if intent.primary_intent in (QueryIntent.ANALYSIS, QueryIntent.RECOMMENDATION):
-            return True
-
-        return False
-
     def _determine_categories(
         self,
         intent: IntentResult,

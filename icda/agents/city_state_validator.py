@@ -540,15 +540,3 @@ class CityStateValidator:
             State code or None if not found.
         """
         return self._city_states.get(city.lower().strip())
-
-
-# Module-level instance for convenience
-_validator: CityStateValidator | None = None
-
-
-def get_validator() -> CityStateValidator:
-    """Get or create the singleton validator instance."""
-    global _validator
-    if _validator is None:
-        _validator = CityStateValidator()
-    return _validator

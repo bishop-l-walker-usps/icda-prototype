@@ -6,7 +6,6 @@ do not degrade existing system behavior. Acts as the final go/no-go decision.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from typing import Any

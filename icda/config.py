@@ -148,29 +148,5 @@ class Config:
             self.openrouter_api_key
         )
 
-    # Backward compatibility
-    def is_gemini_available(self) -> bool:
-        """Deprecated: Use is_enforcer_available instead."""
-        return self.is_enforcer_available()
-
-    def is_opensearch_available(self) -> bool:
-        """Check if OpenSearch is configured."""
-        return bool(self.opensearch_host)
-
-    def is_agentcore_available(self) -> bool:
-        """Check if AgentCore Memory is configured."""
-        return bool(self.agentcore_memory_id and self.enable_agentcore_memory)
-
-    def get_agentcore_config(self) -> dict:
-        """Get AgentCore memory configuration dict."""
-        return {
-            "memory_id": self.agentcore_memory_id if self.agentcore_memory_id else None,
-            "region": self.agentcore_region,
-            "use_ltm": self.agentcore_use_ltm,
-            "stm_retention_days": self.agentcore_stm_retention_days,
-            "ltm_retention_days": self.agentcore_ltm_retention_days,
-            "enabled": self.enable_agentcore_memory,
-        }
-
 
 cfg = Config()

@@ -13,14 +13,13 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()  # Must be before importing config
 
-from fastapi import FastAPI, Request, UploadFile, File, Form, BackgroundTasks
+from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Optional
 import asyncio
-import tempfile
 import shutil
 
 from icda.config import Config
@@ -36,7 +35,7 @@ from icda.knowledge_watcher import KnowledgeWatcher
 from icda.knowledge_index_state import (
     compute_file_hash, load_index_state, save_index_state,
     update_file_state, remove_file_state, needs_reindex,
-    get_stale_files, get_orphaned_entries, mark_full_reindex, get_stats as get_state_stats
+    get_orphaned_entries, mark_full_reindex
 )
 from icda.download_tokens import DownloadTokenManager
 from icda.progress_tracker import ProgressTracker, format_bytes, format_duration

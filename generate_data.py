@@ -2,7 +2,6 @@
 import json
 import random
 from datetime import datetime, timedelta
-from typing import Optional
 
 # Realistic data pools - expanded
 FIRST_NAMES = [

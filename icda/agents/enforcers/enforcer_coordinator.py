@@ -6,7 +6,6 @@ to provide a single go/no-go decision for memory operations.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from typing import Any
@@ -223,45 +222,6 @@ class EnforcerCoordinator:
         # Weight each enforcer equally
         scores = [r.quality_score for r in results]
         return sum(scores) / len(scores)
-
-    async def enforce_memory_only(self, context: dict[str, Any]) -> EnforcerResult:
-        """Run only memory integrity enforcer.
-
-        Useful for validating memory operations before full pipeline.
-
-        Args:
-            context: Memory-related context.
-
-        Returns:
-            EnforcerResult from MemoryIntegrityEnforcer.
-        """
-        return await self._memory_enforcer.enforce(context)
-
-    async def enforce_search_only(self, context: dict[str, Any]) -> EnforcerResult:
-        """Run only search context enforcer.
-
-        Useful for validating search context before search execution.
-
-        Args:
-            context: Search-related context.
-
-        Returns:
-            EnforcerResult from SearchContextEnforcer.
-        """
-        return await self._search_enforcer.enforce(context)
-
-    async def enforce_nova_only(self, context: dict[str, Any]) -> EnforcerResult:
-        """Run only Nova context enforcer.
-
-        Useful for validating Nova context before response generation.
-
-        Args:
-            context: Nova-related context.
-
-        Returns:
-            EnforcerResult from NovaContextEnforcer.
-        """
-        return await self._nova_enforcer.enforce(context)
 
     def get_stats(self) -> dict[str, Any]:
         """Get coordinator statistics."""
