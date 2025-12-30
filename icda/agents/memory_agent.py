@@ -46,6 +46,12 @@ REFERENCE_PRONOUNS = {
     "again", "more like that", "similar",
 }
 
+# Patterns for extracting user self-introduction
+USER_INTRO_PATTERNS = [
+    r"(?:my name is|i'm|i am|call me|name's)\s+([A-Z][a-z]+)",
+    r"(?:this is|it's|its)\s+([A-Z][a-z]+)(?:\s+here)?",
+]
+
 
 class MemoryAgent:
     """Agent for managing working memory within a session.
@@ -132,6 +138,13 @@ class MemoryAgent:
         # Extract user preferences from memory
         user_preferences = self._extract_preferences(entities)
 
+        # Find user facts (like remembered name)
+        user_facts = self._find_user_facts(query_lower, entities)
+        if user_facts:
+            signals.append(f"user_facts:{list(user_facts.keys())}")
+            # Add user facts to preferences for easy access
+            user_preferences.update({"user_facts": user_facts})
+
         # Calculate recall confidence
         confidence = self._calculate_confidence(
             entities, resolved_pronouns, active_customer
@@ -162,7 +175,23 @@ class MemoryAgent:
             response: Generated response.
             query: Original query.
         """
-        if not session_id or not results:
+        if not session_id:
+            return
+
+        # Always try to extract user facts from query, even if no results
+        now = time.time()
+        entities = await self._load_entities(session_id)
+
+        # Extract user facts (like name introduction)
+        user_fact = self._extract_user_fact(query, now)
+        if user_fact:
+            entity_map = {e.entity_id: e for e in entities}
+            entity_map[user_fact.entity_id] = user_fact
+            entities = list(entity_map.values())
+            await self._save_entities(session_id, entities)
+            logger.info(f"Remembered user fact: {user_fact.canonical_name}")
+
+        if not results:
             return
 
         # Load existing entities
@@ -365,6 +394,32 @@ class MemoryAgent:
 
         return preferences
 
+    def _find_user_facts(
+        self,
+        query: str,
+        entities: list[MemoryEntity],
+    ) -> dict[str, str]:
+        """Find user facts from memory.
+
+        Args:
+            query: Lowercase query.
+            entities: All memory entities.
+
+        Returns:
+            Dict of fact_type to value.
+        """
+        facts = {}
+
+        # Find user_fact entities
+        user_fact_entities = [e for e in entities if e.entity_type == "user_fact"]
+        for entity in user_fact_entities:
+            fact_type = entity.attributes.get("fact_type")
+            value = entity.attributes.get("value")
+            if fact_type and value:
+                facts[fact_type] = value
+
+        return facts
+
     def _extract_entities(
         self,
         results: list[dict[str, Any]],
@@ -445,6 +500,39 @@ class MemoryAgent:
                 mention_count=1,
                 confidence=0.8,
             )
+
+        return None
+
+    def _extract_user_fact(
+        self,
+        query: str,
+        timestamp: float,
+    ) -> MemoryEntity | None:
+        """Extract user facts from query (like name introductions).
+
+        Args:
+            query: User query.
+            timestamp: Current timestamp.
+
+        Returns:
+            User fact MemoryEntity or None.
+        """
+        # Check for name introduction patterns
+        for pattern in USER_INTRO_PATTERNS:
+            match = re.search(pattern, query, re.IGNORECASE)
+            if match:
+                name = match.group(1).title()
+                return MemoryEntity(
+                    entity_id="user:name",
+                    entity_type="user_fact",
+                    canonical_name=name,
+                    aliases=[],
+                    attributes={"fact_type": "name", "value": name},
+                    first_mentioned=timestamp,
+                    last_accessed=timestamp,
+                    mention_count=1,
+                    confidence=0.95,
+                )
 
         return None
 

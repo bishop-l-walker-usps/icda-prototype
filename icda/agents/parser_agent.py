@@ -1,11 +1,17 @@
 """Parser Agent - Normalizes queries and extracts entities.
 
 This agent processes the raw query to:
-1. Normalize the query text
-2. Extract entities (CRIDs, names, locations)
-3. Parse filter criteria
-4. Extract date ranges
-5. Determine result limits and sorting
+1. Rewrite ambiguous queries for clarity (NEW)
+2. Normalize the query text
+3. Extract entities (CRIDs, names, locations)
+4. Parse filter criteria
+5. Extract date ranges
+6. Determine result limits and sorting
+
+IMPORTANT: The query rewriter transforms demographic-sounding queries like
+"how many people live in virginia?" into explicit customer data queries
+like "how many customers live in virginia?" to prevent Nova from
+misinterpreting them as census/population questions.
 """
 
 import logging
@@ -15,6 +21,7 @@ from typing import Any
 
 from .models import IntentResult, QueryContext, ParsedQuery
 from .city_state_validator import CityStateValidator
+from .query_rewriter import QueryRewriter, RewriteResult
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +30,11 @@ class ParserAgent:
     """Normalizes queries and extracts structured information.
 
     Follows the enforcer pattern - receives only the context it needs.
+
+    ENHANCED: Now uses QueryRewriter to transform ambiguous queries into
+    explicit customer data queries before processing.
     """
-    __slots__ = ("_db", "_available", "_city_state_validator")
+    __slots__ = ("_db", "_available", "_city_state_validator", "_query_rewriter")
 
     # Common state misspellings -> correct name
     STATE_TYPOS = {
@@ -176,6 +186,7 @@ class ParserAgent:
         self._db = db
         self._available = True
         self._city_state_validator = CityStateValidator()
+        self._query_rewriter = QueryRewriter()
 
     @property
     def available(self) -> bool:
@@ -271,29 +282,75 @@ class ParserAgent:
         """
         resolution_notes = []
 
-        # Normalize query
-        normalized = self._normalize_query(query, resolution_notes)
+        # =====================================================================
+        # NEW: Rewrite ambiguous queries FIRST
+        # This transforms "how many people live in virginia?" into
+        # "how many customers live in virginia?" to prevent Nova from
+        # misinterpreting as a demographic/census question.
+        # =====================================================================
+        rewrite_result = self._query_rewriter.rewrite(query)
 
-        # Extract entities
-        entities = self._extract_entities(query, context, resolution_notes)
+        if rewrite_result.was_rewritten:
+            resolution_notes.append(
+                f"Query rewritten: '{query}' → '{rewrite_result.rewritten_query}'"
+            )
+            resolution_notes.extend(rewrite_result.rewrites_applied)
+            logger.info(
+                f"ParserAgent: Query rewritten for clarity: "
+                f"'{query}' → '{rewrite_result.rewritten_query}'"
+            )
 
-        # Extract filters
-        filters = self._extract_filters(query, context, resolution_notes)
+        # Use the rewritten query for all subsequent processing
+        working_query = rewrite_result.rewritten_query
+
+        # Track detected state from rewriter for consistency
+        if rewrite_result.detected_state_code and not context.geographic_context.get("state"):
+            resolution_notes.append(
+                f"State detected: {rewrite_result.detected_state} ({rewrite_result.detected_state_code})"
+            )
+
+        # Track ambiguous city if detected
+        if rewrite_result.is_ambiguous_city:
+            resolution_notes.append(
+                f"Ambiguous city: {rewrite_result.detected_city} "
+                f"(could be {', '.join(rewrite_result.ambiguous_city_states or [])})"
+            )
+
+        # Normalize query (using rewritten version)
+        normalized = self._normalize_query(working_query, resolution_notes)
+
+        # Extract entities (using rewritten version)
+        entities = self._extract_entities(working_query, context, resolution_notes)
+
+        # If rewriter detected state, ensure it's in entities
+        if rewrite_result.detected_state_code:
+            if rewrite_result.detected_state_code not in entities.get("states", []):
+                entities.setdefault("states", []).append(rewrite_result.detected_state_code)
+
+        # Extract filters (using rewritten version)
+        filters = self._extract_filters(working_query, context, resolution_notes)
+
+        # If rewriter detected state and filters don't have it, add it
+        if rewrite_result.detected_state_code and "state" not in filters:
+            filters["state"] = rewrite_result.detected_state_code
+            resolution_notes.append(
+                f"State filter from rewriter: {rewrite_result.detected_state_code}"
+            )
 
         # Extract date range
-        date_range = self._extract_date_range(query, resolution_notes)
+        date_range = self._extract_date_range(working_query, resolution_notes)
 
         # Determine limit
-        limit = self._extract_limit(query, context)
+        limit = self._extract_limit(working_query, context)
 
         # Determine sort preference
-        sort_preference = self._extract_sort(query)
+        sort_preference = self._extract_sort(working_query)
 
         # Check if follow-up
         is_follow_up = context.is_follow_up
 
         return ParsedQuery(
-            original_query=query,
+            original_query=query,  # Keep original for reference
             normalized_query=normalized,
             entities=entities,
             filters=filters,
