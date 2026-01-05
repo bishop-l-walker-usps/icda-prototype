@@ -263,6 +263,20 @@ class QueryOrchestrator:
                 trace,
             )
 
+            # =========================================================================
+            # FAST PATH: Skip 12-agent pipeline for simple searches
+            # This cuts latency from ~18s to ~500ms for queries like "find Chris"
+            # =========================================================================
+            from icda.classifier import QueryComplexity, QueryIntent
+            
+            if await self._should_use_fast_path(intent, query):
+                logger.info(f"FAST PATH: Skipping full pipeline for simple query")
+                fast_result = await self._execute_fast_path(query, intent, session_id, trace)
+                if fast_result:
+                    return fast_result
+                # If fast path fails, fall through to full pipeline
+                logger.warning("Fast path failed, falling back to full pipeline")
+
             # Stage 2: Memory Recall (Enhanced with Unified Memory)
             # Use unified memory local_context for backward compatibility
             # The unified memory was loaded at pipeline start with AgentCore data
@@ -872,6 +886,191 @@ class QueryOrchestrator:
         if nova_response.tools_used:
             return "nova_with_tools"
         return "nova"
+
+    # =========================================================================
+    # FAST PATH METHODS - Skip 12-agent pipeline for simple queries
+    # =========================================================================
+
+    async def _should_use_fast_path(self, intent: IntentResult, query: str) -> bool:
+        """Determine if query can use fast path (skip full pipeline).
+
+        Fast path is used for:
+        - SIMPLE complexity queries
+        - SEARCH or LOOKUP intents
+        - No complex filters (move_from, status combinations)
+        - High confidence intent classification
+
+        Args:
+            intent: Intent classification result.
+            query: Original query string.
+
+        Returns:
+            True if fast path should be used.
+        """
+        from icda.classifier import QueryComplexity, QueryIntent
+
+        # Only use fast path for SIMPLE queries
+        if intent.complexity != QueryComplexity.SIMPLE:
+            logger.debug(f"Fast path rejected: complexity={intent.complexity.value}")
+            return False
+
+        # Only for SEARCH and LOOKUP intents
+        if intent.primary_intent not in (QueryIntent.SEARCH, QueryIntent.LOOKUP):
+            logger.debug(f"Fast path rejected: intent={intent.primary_intent.value}")
+            return False
+
+        # Require high confidence in intent classification
+        if intent.confidence < 0.7:
+            logger.debug(f"Fast path rejected: low confidence={intent.confidence}")
+            return False
+
+        # Check for complex filter keywords that need full pipeline
+        complex_keywords = (
+            "inactive", "active", "pending",  # status filters
+            "moved from", "relocated from",   # origin state
+            "how many", "count",               # stats queries
+            "compare", "analyze", "trend",    # analysis
+        )
+        query_lower = query.lower()
+        if any(kw in query_lower for kw in complex_keywords):
+            logger.debug(f"Fast path rejected: complex keywords detected")
+            return False
+
+        logger.info(f"Fast path approved: intent={intent.primary_intent.value}, confidence={intent.confidence}")
+        return True
+
+    async def _execute_fast_path(
+        self,
+        query: str,
+        intent: IntentResult,
+        session_id: str | None,
+        trace: PipelineTrace | None,
+    ) -> QueryResult | None:
+        """Execute fast path: Intent -> Parser -> Search -> Format.
+
+        Skips: Memory, Context, Resolver, Knowledge, Nova, Enforcer,
+               EnforcerCoordinator, Personality, Suggestions
+
+        Args:
+            query: User query string.
+            intent: Intent classification result.
+            session_id: Optional session ID.
+            trace: Optional trace for debugging.
+
+        Returns:
+            QueryResult if successful, None to fall back to full pipeline.
+        """
+        start_time = time.time()
+
+        try:
+            # Minimal parsing - extract basic filters
+            parsed = await self._parser_agent.parse(
+                query=query,
+                intent=intent,
+                context=QueryContext(session_id=session_id or ""),
+            )
+
+            if trace:
+                trace.add_stage(
+                    agent="parser_fast",
+                    output=parsed.to_dict() if hasattr(parsed, "to_dict") else {},
+                    time_ms=int((time.time() - start_time) * 1000),
+                    success=True,
+                )
+
+            # Minimal resolution - no fancy entity resolution
+            resolved = ResolvedQuery(
+                original_query=query,
+                normalized_query=parsed.normalized_query,
+                resolved_crids=parsed.crids,
+                resolved_customers=[],
+                fallback_strategies=["filtered_search", "fuzzy_search"],
+                resolution_confidence=0.8,
+            )
+
+            # Direct search - no knowledge retrieval
+            search_start = time.time()
+            search_result = await self._search_agent.search(
+                resolved=resolved,
+                parsed=parsed,
+                intent=intent,
+                escalation=None,
+            )
+
+            if trace:
+                trace.add_stage(
+                    agent="search_fast",
+                    output=search_result.to_dict() if hasattr(search_result, "to_dict") else {},
+                    time_ms=int((time.time() - search_start) * 1000),
+                    success=True,
+                    confidence=search_result.search_confidence,
+                )
+
+            # Format results directly (no Nova AI)
+            response = self._format_fast_response(query, search_result)
+
+            total_ms = int((time.time() - start_time) * 1000)
+
+            if trace:
+                trace.total_time_ms = total_ms
+                trace.success = True
+
+            logger.info(f"Fast path completed in {total_ms}ms (vs ~18000ms full pipeline)")
+
+            return QueryResult(
+                success=True,
+                response=response,
+                route="fast_path",
+                tools_used=[],
+                quality_score=0.85,  # Fast path has good quality for simple queries
+                latency_ms=total_ms,
+                trace=trace,
+                metadata={
+                    "intent": intent.to_dict(),
+                    "search_strategy": search_result.strategy_used.value,
+                    "fast_path": True,
+                    "agents_skipped": ["memory", "context", "resolver", "knowledge", "nova", "enforcer", "personality", "suggestions"],
+                },
+                results=search_result.results,
+            )
+
+        except Exception as e:
+            logger.warning(f"Fast path failed: {e}")
+            return None  # Fall back to full pipeline
+
+    def _format_fast_response(self, query: str, search_result: SearchResult) -> str:
+        """Format search results into a response without AI.
+
+        Args:
+            query: Original query.
+            search_result: Search results.
+
+        Returns:
+            Formatted response string.
+        """
+        if not search_result.results:
+            return "No customers found matching your search. Try different criteria or check spelling."
+
+        total = search_result.total_matches
+        shown = min(len(search_result.results), 10)
+
+        lines = [f"Found **{total}** customer(s). Here are the top {shown}:\n"]
+
+        for i, customer in enumerate(search_result.results[:10], 1):
+            crid = customer.get("crid", "N/A")
+            name = customer.get("name", "N/A")
+            city = customer.get("city", "N/A")
+            state = customer.get("state", "N/A")
+            moves = customer.get("move_count", 0)
+            status = customer.get("status", "N/A")
+
+            lines.append(f"{i}. **{name}** (CRID: {crid})")
+            lines.append(f"   {city}, {state} | Moves: {moves} | Status: {status}")
+
+        if total > 10:
+            lines.append(f"\n... and {total - 10} more customers.")
+
+        return "\n".join(lines)
 
     def get_stats(self) -> dict[str, Any]:
         """Get orchestrator statistics.

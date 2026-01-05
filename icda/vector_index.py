@@ -324,15 +324,21 @@ class VectorIndex:
         try:
             resp = await self.client.search(index=self.customer_index, body=search_body)
             results = []
+            # CRITICAL: Filter out low-score garbage matches
+            # Scores below 0.7 are usually false positives (e.g., "Chris" matching "Charles")
+            MIN_SCORE_THRESHOLD = 0.7
             for hit in resp["hits"]["hits"]:
+                score = hit["_score"]
+                if score < MIN_SCORE_THRESHOLD:
+                    continue  # Skip garbage matches
                 src = hit["_source"]
                 results.append({
                     "crid": src["crid"], "name": src["name"], "address": src["address"],
                     "city": src["city"], "state": src["state"], "zip": src["zip"],
                     "customer_type": src["customer_type"], "status": src["status"],
-                    "move_count": src["move_count"], "score": round(hit["_score"], 4)
+                    "move_count": src["move_count"], "score": round(score, 4)
                 })
-            return {"success": True, "query": query, "count": len(results), "data": results}
+            return {"success": True, "query": query, "count": len(results), "data": results, "min_score_threshold": MIN_SCORE_THRESHOLD}
         except Exception as e:
             return {"success": False, "error": str(e), "count": 0, "data": []}
 
@@ -371,12 +377,17 @@ class VectorIndex:
         try:
             resp = await self.client.search(index=self.customer_index, body=search_body)
             results = []
+            # CRITICAL: Filter out low-score garbage matches
+            MIN_SCORE_THRESHOLD = 0.7
             for hit in resp["hits"]["hits"]:
+                score = hit["_score"]
+                if score < MIN_SCORE_THRESHOLD:
+                    continue  # Skip garbage matches
                 src = hit["_source"]
                 results.append({
                     "crid": src["crid"], "name": src["name"], "address": src["address"],
                     "city": src["city"], "state": src["state"], "move_count": src["move_count"],
-                    "score": round(hit["_score"], 4)
+                    "score": round(score, 4)
                 })
             return {"success": True, "query": query, "count": len(results), "data": results}
         except Exception as e:

@@ -186,18 +186,17 @@ class CustomerDB:
             words = text_lower.split()
             if any(w.startswith(query_lower) for w in words):
                 return 0.7
-            # Character overlap (trigram-like)
-            query_chars = set(query_lower)
-            text_chars = set(text_lower)
-            overlap = len(query_chars & text_chars) / len(query_chars)
-            return overlap * 0.5 if overlap > 0.6 else 0
+            # DISABLED: Character overlap produces garbage matches
+            # "Chris" matching "Charles" because they share {c,h,r,s} is not useful
+            # Only allow matches that actually contain the search term or start with it
+            return 0
 
         scored = []
         seen = set()
         for c in self.customers:
             value = c[field]
             score = similarity(value)
-            if score > 0.4 and value.lower() not in seen:
+            if score > 0.65 and value.lower() not in seen:  # Raised from 0.4 to reduce garbage matches
                 seen.add(value.lower())
                 scored.append((score, c))
 
