@@ -137,6 +137,14 @@ SPANISH_STREET_TERMS: dict[str, str] = {
     "res": "Res",
     "condominio": "Cond",
     "cond": "Cond",
+    "paseo": "Pseo",       # Walkway/promenade
+    "sector": "Sect",       # Sector (similar to urbanization)
+    "barrio": "Brro",       # Neighborhood
+    "parcela": "Parc",      # Parcel/plot
+    "carr": "Hwy",          # Carretera = Highway
+    "carretera": "Hwy",
+    "camino": "Cam",        # Path/road
+    "boulevar": "Blvd",     # Spanish spelling
 }
 
 
@@ -179,7 +187,9 @@ class AddressNormalizer:
     # Puerto Rico urbanization pattern - captures text after URB/URBANIZACION
     # until a street indicator (CALLE, AVE, number, comma) or end
     _URB_PATTERN = re.compile(
-        r"\b(?:urb|urbanizacion|urbanización)\s+([A-Za-z\s]+?)(?=\s*(?:calle|ave|avenida|\d|,|$))",
+        r"\b(?:urb\.?|urbanizacion|urbanización)\s+"
+        r"([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-\.]+?)"
+        r"(?=\s*(?:calle|ave|avenida|apt|apartamento|edificio|edif|cond|condominio|res|residencial|\d|,|$))",
         re.IGNORECASE,
     )
     # Alternative: captures everything after URB up to common delimiters

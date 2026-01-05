@@ -44,7 +44,15 @@ CRITICAL RULES:
 - If matched=true, the completed_address MUST be copied exactly from a candidate
 - Street numbers must match exactly (101 cannot match 102)
 - If uncertain, set matched=false - it's better to reject than accept a bad match
-- Confidence should be 0.9+ only for very clear matches"""
+- Confidence should be 0.9+ only for very clear matches
+
+PUERTO RICO SPECIAL HANDLING:
+- PR addresses (ZIP 006-009) require an URBANIZATION (URB) field for deliverability
+- URB identifies the subdivision and is CRITICAL - same address can exist in multiple URBs
+- Format: URB [NAME] on a separate line before the street address
+- Spanish street terms: CALLE (street), AVENIDA (avenue), RESIDENCIAL (public housing)
+- If a PR address lacks urbanization, flag "missing_urbanization": true in your response
+- Common urbanization names: VILLA CAROLINA, LAS GLADIOLAS, CONDADO, LEVITTOWN"""
 
     _COMPLETION_PROMPT = """Analyze this partial address and find the best match:
 
@@ -57,6 +65,8 @@ PARSED COMPONENTS:
 - City: {city}
 - State: {state}
 - ZIP: {zip_code}
+- Urbanization: {urbanization}
+- Is Puerto Rico: {is_puerto_rico}
 
 CANDIDATE ADDRESSES IN THIS AREA:
 {candidates}
@@ -79,7 +89,11 @@ Respond with JSON only:
     "alternatives": [
         {{"address": "full address string", "confidence": 0.0-1.0}}
     ]
-}}"""
+}}
+
+For Puerto Rico addresses (ZIP 006-009):
+- Include "urbanization" field in completed_address if available
+- Set "missing_urbanization": true if PR address lacks URB"""
 
     def __init__(
         self,
@@ -146,6 +160,8 @@ Respond with JSON only:
             city=parsed.city or "unknown",
             state=parsed.state or "unknown",
             zip_code=parsed.zip_code or "unknown",
+            urbanization=parsed.urbanization or "unknown",
+            is_puerto_rico=parsed.is_puerto_rico,
             candidates=candidates or "No candidates available",
         )
 

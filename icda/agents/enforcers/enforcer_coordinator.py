@@ -1,6 +1,6 @@
 """Enforcer Coordinator - Orchestrates all memory enforcers.
 
-Runs all 5 memory enforcers in sequence and aggregates results
+Runs all 6 memory enforcers in sequence and aggregates results
 to provide a single go/no-go decision for memory operations.
 """
 
@@ -16,19 +16,21 @@ from .search_context_enforcer import SearchContextEnforcer
 from .nova_context_enforcer import NovaContextEnforcer
 from .response_quality_enforcer import ResponseQualityEnforcer
 from .functionality_preservation_enforcer import FunctionalityPreservationEnforcer
+from .pr_address_enforcer import PRAddressPreservationEnforcer
 
 logger = logging.getLogger(__name__)
 
 
 class EnforcerCoordinator:
-    """Orchestrates all 5 memory enforcers in sequence.
+    """Orchestrates all 6 memory enforcers in sequence.
 
     Execution Order:
     1. MemoryIntegrityEnforcer - Validate memory read/write
     2. SearchContextEnforcer - Validate context for search
     3. NovaContextEnforcer - Validate context for Nova
     4. ResponseQualityEnforcer - Final response validation
-    5. FunctionalityPreservationEnforcer - Meta-validation & metrics
+    5. PRAddressPreservationEnforcer - PR address quality (if applicable)
+    6. FunctionalityPreservationEnforcer - Meta-validation & metrics
 
     The coordinator:
     - Runs enforcers in sequence (early exit on critical failure)
@@ -43,6 +45,7 @@ class EnforcerCoordinator:
         "_nova_enforcer",
         "_response_enforcer",
         "_preservation_enforcer",
+        "_pr_address_enforcer",
         "_enabled",
         "_fail_fast",
     )
@@ -78,6 +81,9 @@ class EnforcerCoordinator:
         )
         self._preservation_enforcer = FunctionalityPreservationEnforcer(
             enabled=enabled, strict_mode=True  # Always strict for preservation
+        )
+        self._pr_address_enforcer = PRAddressPreservationEnforcer(
+            enabled=enabled, strict_mode=True
         )
 
     @property
@@ -159,7 +165,16 @@ class EnforcerCoordinator:
             if self._fail_fast:
                 return self._create_response(results, start_time, all_passed)
 
-        # 5. Functionality Preservation (final, with other results)
+        # 5. PR Address Preservation (if PR addresses present)
+        if self._has_pr_addresses(context):
+            pr_result = await self._pr_address_enforcer.enforce(context)
+            results.append(pr_result)
+            if not pr_result.passed:
+                all_passed = False
+                if self._fail_fast:
+                    return self._create_response(results, start_time, all_passed)
+
+        # 6. Functionality Preservation (final, with other results)
         preservation_context = {
             **context,
             "enforcer_results": results,
@@ -244,3 +259,29 @@ class EnforcerCoordinator:
     def disable_shadow_mode(self) -> None:
         """Disable shadow mode."""
         self._preservation_enforcer.disable_shadow_mode()
+
+    def _has_pr_addresses(self, context: dict[str, Any]) -> bool:
+        """Check if context contains Puerto Rico addresses.
+
+        Args:
+            context: Pipeline context dictionary.
+
+        Returns:
+            True if PR addresses are present.
+        """
+        addresses = context.get("addresses", [])
+        for addr in addresses:
+            # Check explicit PR flag
+            if addr.get("is_puerto_rico"):
+                return True
+            # Check ZIP code prefix
+            zip_code = addr.get("zip_code", addr.get("zip", ""))
+            if zip_code and len(str(zip_code)) >= 3:
+                if str(zip_code)[:3] in ("006", "007", "008", "009"):
+                    return True
+        return False
+
+    @property
+    def pr_address_enforcer(self) -> PRAddressPreservationEnforcer:
+        """Get the PR address preservation enforcer for direct access."""
+        return self._pr_address_enforcer

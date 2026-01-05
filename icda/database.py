@@ -162,8 +162,9 @@ class CustomerDB:
 
     def autocomplete_fuzzy(self, field: str, query: str, limit: int = 10) -> dict:
         """
-        Fuzzy autocomplete using trigram-like similarity.
-        Slower but handles typos and partial matches.
+        Fuzzy autocomplete - STRICT mode for direct name searches.
+        Only matches names that contain or start with the query.
+        Use search_similar_names() for phonetic/Levenshtein similarity.
         """
         query_lower = query.lower().strip()
         if len(query_lower) < 2:
@@ -173,7 +174,7 @@ class CustomerDB:
         if field not in ("address", "name", "city"):
             return {"success": False, "error": f"Unknown field: {field}"}
 
-        # Score each customer by similarity
+        # Score each customer by similarity - STRICT matching only
         def similarity(text: str) -> float:
             text_lower = text.lower()
             # Exact prefix match = highest score
@@ -182,13 +183,12 @@ class CustomerDB:
             # Contains match
             if query_lower in text_lower:
                 return 0.8
-            # Word starts with query
+            # Word starts with query (e.g., "Chris" matches "John Chris Smith")
             words = text_lower.split()
             if any(w.startswith(query_lower) for w in words):
                 return 0.7
-            # DISABLED: Character overlap produces garbage matches
-            # "Chris" matching "Charles" because they share {c,h,r,s} is not useful
-            # Only allow matches that actually contain the search term or start with it
+            # NO character overlap matching - causes garbage results
+            # "Chris" should NOT match "Charles" just because they share letters
             return 0
 
         scored = []
@@ -196,7 +196,7 @@ class CustomerDB:
         for c in self.customers:
             value = c[field]
             score = similarity(value)
-            if score > 0.65 and value.lower() not in seen:  # Raised from 0.4 to reduce garbage matches
+            if score > 0.65 and value.lower() not in seen:
                 seen.add(value.lower())
                 scored.append((score, c))
 
@@ -209,6 +209,119 @@ class CustomerDB:
         ]
 
         return {"success": True, "field": field, "query": query, "count": len(results), "data": results}
+
+    def search_similar_names(self, name: str, limit: int = 10, state: str = None) -> dict:
+        """
+        Find names SIMILAR to the query using Levenshtein distance.
+        Use this for "find names similar to Chris" → returns Chris, Charles, Christian, etc.
+        
+        Args:
+            name: Name to find similar matches for
+            limit: Maximum results to return
+            state: Optional state filter
+        """
+        query_lower = name.lower().strip()
+        if len(query_lower) < 2:
+            return {"success": False, "error": "Query too short (min 2 chars)"}
+
+        def levenshtein_distance(s1: str, s2: str) -> int:
+            """Calculate Levenshtein edit distance between two strings."""
+            if len(s1) < len(s2):
+                s1, s2 = s2, s1
+            if len(s2) == 0:
+                return len(s1)
+            
+            prev_row = range(len(s2) + 1)
+            for i, c1 in enumerate(s1):
+                curr_row = [i + 1]
+                for j, c2 in enumerate(s2):
+                    # Cost is 0 if characters match, 1 otherwise
+                    insertions = prev_row[j + 1] + 1
+                    deletions = curr_row[j] + 1
+                    substitutions = prev_row[j] + (c1 != c2)
+                    curr_row.append(min(insertions, deletions, substitutions))
+                prev_row = curr_row
+            return prev_row[-1]
+
+        def name_similarity(full_name: str) -> float:
+            """Score similarity based on Levenshtein distance of first name."""
+            full_lower = full_name.lower()
+            # Extract first name (first word)
+            first_name = full_lower.split()[0] if full_lower.split() else full_lower
+            
+            # Exact match = perfect score
+            if first_name == query_lower:
+                return 1.0
+            
+            # Starts with query = very high score
+            if first_name.startswith(query_lower):
+                return 0.95
+            
+            # Query starts with first name (e.g., "Christopher" when searching "Chris")
+            if query_lower.startswith(first_name):
+                return 0.9
+            
+            # Levenshtein distance - normalize by max length
+            distance = levenshtein_distance(first_name, query_lower)
+            max_len = max(len(first_name), len(query_lower))
+            similarity = 1.0 - (distance / max_len)
+            
+            # Also check if they share the same starting letters (phonetic similarity)
+            shared_prefix = 0
+            for a, b in zip(first_name, query_lower):
+                if a == b:
+                    shared_prefix += 1
+                else:
+                    break
+            prefix_bonus = shared_prefix / max_len * 0.2
+            
+            return min(similarity + prefix_bonus, 0.89)  # Cap below exact matches
+
+        # Filter by state first if provided
+        candidates = self.customers
+        if state:
+            state_upper = state.upper()
+            if state_upper in self.available_states:
+                candidates = self.by_state.get(state_upper, [])
+            else:
+                return {"success": True, "total": 0, "data": [], "reason": f"No data for {state_upper}"}
+
+        # Score all candidates
+        scored = []
+        seen_names = set()
+        for c in candidates:
+            name_val = c["name"]
+            name_key = name_val.lower()
+            if name_key in seen_names:
+                continue
+            
+            score = name_similarity(name_val)
+            if score >= 0.5:  # Lower threshold for similarity search
+                seen_names.add(name_key)
+                scored.append((score, c))
+
+        # Sort by score descending
+        scored.sort(key=lambda x: -x[0])
+        
+        results = [
+            {
+                "crid": c["crid"],
+                "name": c["name"],
+                "city": c["city"],
+                "state": c["state"],
+                "similarity_score": round(s, 3),
+                "match_type": "exact" if s >= 0.95 else "similar"
+            }
+            for s, c in scored[:limit]
+        ]
+
+        return {
+            "success": True,
+            "query": name,
+            "search_type": "similar_names",
+            "total": len(results),
+            "data": results
+        }
 
     def lookup(self, crid: str) -> dict:
         crid = crid.upper()

@@ -53,6 +53,11 @@ class EnforcerGate(str, Enum):
     GRACEFUL_DEGRADATION = "graceful_degradation"
     CONTEXT_PRESERVATION = "context_preservation"
 
+    # Puerto Rico Address Gates
+    PR_URBANIZATION_REQUIRED = "pr_urbanization_required"
+    PR_FORMAT_PRESERVED = "pr_format_preserved"
+    PR_CONFIDENCE_MAINTAINED = "pr_confidence_maintained"
+
 
 @dataclass(slots=True)
 class GateResult:
