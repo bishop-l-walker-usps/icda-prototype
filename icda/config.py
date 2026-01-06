@@ -110,6 +110,20 @@ class Config:
         default_factory=lambda: _parse_int(getenv("AGENTCORE_LTM_RETENTION_DAYS", ""), 30)
     )
 
+    # ==================== C Library Data Source ====================
+    # Path to C library export file (weekly metadata export)
+    c_library_export_path: str = field(
+        default_factory=lambda: getenv("C_LIBRARY_EXPORT_PATH", "")
+    )
+    # C library REST API URL for direct fetches
+    c_library_api_url: str = field(
+        default_factory=lambda: getenv("C_LIBRARY_API_URL", "")
+    )
+    # Timeout for C library API requests (seconds)
+    c_library_timeout: float = field(
+        default_factory=lambda: _parse_float(getenv("C_LIBRARY_TIMEOUT", ""), 30.0)
+    )
+
     # ==================== Feature Flags ====================
     enable_federation: bool = field(
         default_factory=lambda: _parse_bool(getenv("ENABLE_FEDERATION", ""), True)

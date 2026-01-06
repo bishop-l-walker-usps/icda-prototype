@@ -15,6 +15,8 @@ import type {
   KnowledgeStats,
   KnowledgeUploadResult,
   KnowledgeSearchResult,
+  EnhancedValidationResponse,
+  QuickValidationResponse,
 } from '../types';
 
 // Download result response type
@@ -396,6 +398,122 @@ export const api = {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  },
+
+  // ============================================================================
+  // Enhanced Address Validation API
+  // ============================================================================
+
+  // Enhanced address validation with detailed scoring
+  validateAddressEnhanced: async (
+    address: string,
+    mode: 'validate' | 'complete' | 'correct' | 'standardize' = 'correct',
+    context?: Record<string, string>
+  ): Promise<EnhancedValidationResponse> => {
+    const response = await apiClient.post<EnhancedValidationResponse>(
+      '/api/address/validate',
+      { address, mode, context: context || {} }
+    );
+    return response.data;
+  },
+
+  // Quick validation check
+  validateAddressQuick: async (
+    address: string,
+    mode: 'validate' | 'complete' | 'correct' | 'standardize' = 'correct'
+  ): Promise<QuickValidationResponse> => {
+    const response = await apiClient.get<QuickValidationResponse>(
+      '/api/address/validate/quick',
+      { params: { address, mode } }
+    );
+    return response.data;
+  },
+
+  // Complete a partial address
+  completeAddress: async (
+    address: string,
+    context?: Record<string, string>
+  ): Promise<{
+    success: boolean;
+    original: Record<string, unknown>;
+    completed: Record<string, unknown> | null;
+    standardized: string | null;
+    completions_made: string[];
+    confidence: number;
+    confidence_percent: number;
+    is_complete: boolean;
+  }> => {
+    const response = await apiClient.post('/api/address/complete', null, {
+      params: { address, ...(context || {}) },
+    });
+    return response.data;
+  },
+
+  // Correct errors in an address
+  correctAddress: async (
+    address: string,
+    context?: Record<string, string>
+  ): Promise<{
+    success: boolean;
+    original: Record<string, unknown>;
+    corrected: Record<string, unknown> | null;
+    standardized: string | null;
+    corrections_made: string[];
+    confidence: number;
+    confidence_percent: number;
+    was_corrected: boolean;
+  }> => {
+    const response = await apiClient.post('/api/address/correct', null, {
+      params: { address, ...(context || {}) },
+    });
+    return response.data;
+  },
+
+  // Standardize address to USPS format
+  standardizeAddress: async (
+    address: string
+  ): Promise<{
+    success: boolean;
+    original: string;
+    standardized: string | null;
+    confidence: number;
+    is_puerto_rico: boolean;
+  }> => {
+    const response = await apiClient.post('/api/address/standardize', null, {
+      params: { address },
+    });
+    return response.data;
+  },
+
+  // Batch validation with enhanced scoring
+  validateAddressBatch: async (
+    addresses: string[],
+    mode: 'validate' | 'complete' | 'correct' | 'standardize' = 'correct'
+  ): Promise<{
+    success: boolean;
+    total: number;
+    valid_count: number;
+    deliverable_count: number;
+    valid_rate: number;
+    deliverable_rate: number;
+    average_confidence: number;
+    average_confidence_percent: number;
+    results: Array<{
+      address: string;
+      is_valid: boolean;
+      is_deliverable: boolean;
+      confidence: number;
+      confidence_percent: number;
+      status: string;
+      standardized: string | null;
+      corrections_count: number;
+      issues_count: number;
+    }>;
+  }> => {
+    const response = await apiClient.post('/api/address/validate/batch', addresses, {
+      params: { mode },
+    });
+    return response.data;
   },
 };
 

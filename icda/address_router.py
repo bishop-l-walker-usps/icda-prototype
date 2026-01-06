@@ -19,6 +19,11 @@ from icda.address_models import (
     VerificationStatus,
 )
 from icda.address_pipeline import AddressPipeline, BatchProcessor
+from icda.address_validator_engine import (
+    AddressValidatorEngine,
+    ValidationMode,
+    ValidationResult,
+)
 
 from icda.agents.orchestrator import AddressAgentOrchestrator
 
@@ -32,6 +37,7 @@ router = APIRouter(prefix="/api/address", tags=["Address Verification"])
 _pipeline: AddressPipeline | None = None
 _batch_processor: BatchProcessor | None = None
 _orchestrator = None  # Will be AddressAgentOrchestrator when implemented
+_validator_engine: AddressValidatorEngine | None = None
 
 
 def configure_router(
@@ -44,10 +50,11 @@ def configure_router(
         pipeline: Initialized address verification pipeline.
         orchestrator: Optional 5-agent orchestrator for intelligent verification.
     """
-    global _pipeline, _batch_processor, _orchestrator
+    global _pipeline, _batch_processor, _orchestrator, _validator_engine
     _pipeline = pipeline
     _batch_processor = BatchProcessor(pipeline)
     _orchestrator = orchestrator
+    _validator_engine = AddressValidatorEngine(address_index=pipeline.index)
     logger.info(f"Address router configured (orchestrator={'enabled' if orchestrator else 'disabled'})")
 
 
@@ -193,6 +200,106 @@ class IndexStatsResponse(BaseModel):
     unique_cities: int
     unique_streets: int
     indexed: bool
+
+
+# ============================================================================
+# Enhanced Validation Request/Response Models
+# ============================================================================
+
+
+class EnhancedValidateRequest(BaseModel):
+    """Request model for enhanced address validation with detailed scoring."""
+
+    address: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="Raw address string to validate",
+        examples=[
+            "101 turkey 22222",
+            "123 Main Stret, New York, NY 10001",
+            "456 Oak Ave Apt 2B, Los Angeles CA",
+        ],
+    )
+    mode: str = Field(
+        default="correct",
+        description="Validation mode: 'validate' (check only), 'complete' (fill missing), 'correct' (fix errors), 'standardize' (USPS format)",
+    )
+    context: dict[str, str] = Field(
+        default_factory=dict,
+        description="Context hints to improve validation (e.g., {'zip': '22222', 'state': 'VA'})",
+    )
+
+
+class ComponentScoreResponse(BaseModel):
+    """Score details for a single address component."""
+
+    component: str
+    confidence: str
+    score: float
+    original_value: str | None
+    validated_value: str | None
+    was_corrected: bool
+    was_completed: bool
+    correction_reason: str | None
+    alternatives: list[str]
+
+
+class ValidationIssueResponse(BaseModel):
+    """Issue found during validation."""
+
+    severity: str
+    component: str | None
+    message: str
+    suggestion: str | None
+    auto_fixable: bool
+
+
+class EnhancedValidateResponse(BaseModel):
+    """Comprehensive response for enhanced address validation."""
+
+    # Overall status
+    is_valid: bool = Field(description="Whether the address passes validation")
+    is_deliverable: bool = Field(description="Whether the address is likely deliverable")
+    overall_confidence: float = Field(description="Overall confidence score (0.0-1.0)")
+    confidence_percent: float = Field(description="Confidence as percentage (0-100)")
+    quality: str = Field(description="Quality classification: complete, partial, ambiguous, invalid")
+    status: str = Field(description="Verification status: verified, corrected, completed, suggested, unverified")
+
+    # Address data
+    original: dict[str, Any] = Field(description="Original parsed address")
+    validated: dict[str, Any] | None = Field(description="Validated/corrected address (if valid)")
+    standardized: str | None = Field(description="USPS-formatted single line address")
+
+    # Component-level details
+    component_scores: list[ComponentScoreResponse] = Field(description="Detailed scores for each component")
+    issues: list[ValidationIssueResponse] = Field(description="Issues found during validation")
+    corrections_applied: list[str] = Field(description="List of corrections made")
+    completions_applied: list[str] = Field(description="List of completions made")
+
+    # Alternatives
+    alternatives: list[dict[str, Any]] = Field(description="Alternative address suggestions")
+
+    # Puerto Rico specific
+    is_puerto_rico: bool = Field(default=False, description="True if Puerto Rico address")
+    urbanization_status: str | None = Field(default=None, description="Urbanization status: present, missing, inferred")
+
+    # Metadata
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class QuickValidateResponse(BaseModel):
+    """Simplified response for quick validation checks."""
+
+    valid: bool
+    deliverable: bool
+    confidence: float
+    confidence_percent: float
+    status: str
+    formatted_address: str | None
+    issues_count: int
+    corrections_count: int
+    primary_issue: str | None
 
 
 # ============================================================================
@@ -396,8 +503,338 @@ async def health_check() -> dict[str, Any]:
         "pipeline": _pipeline is not None,
         "batch_processor": _batch_processor is not None,
         "orchestrator": _orchestrator is not None,
+        "validator_engine": _validator_engine is not None,
         "index_ready": _pipeline.index.is_indexed if _pipeline else False,
         "completer_available": _pipeline.completer.available if _pipeline else False,
+    }
+
+
+# ============================================================================
+# Enhanced Validation Endpoints
+# ============================================================================
+
+
+@router.post("/validate", response_model=EnhancedValidateResponse)
+async def validate_address_enhanced(
+    request: EnhancedValidateRequest,
+) -> EnhancedValidateResponse:
+    """Validate an address with comprehensive scoring and detailed feedback.
+
+    This endpoint provides detailed validation including:
+    - Component-level confidence scores
+    - Automatic typo correction with tracking
+    - Missing component completion
+    - USPS standardized formatting
+    - Detailed issues and fix suggestions
+    - Puerto Rico urbanization handling
+
+    Modes:
+    - validate: Check validity only, no corrections
+    - complete: Fill in missing components where possible
+    - correct: Fix errors and complete missing parts (default)
+    - standardize: Format to USPS standard
+
+    Args:
+        request: Validation request with address, mode, and optional context.
+
+    Returns:
+        Comprehensive validation result with component scores and suggestions.
+    """
+    if not _validator_engine:
+        raise HTTPException(status_code=503, detail="Validator engine not initialized")
+
+    # Parse validation mode
+    try:
+        mode = ValidationMode(request.mode.lower())
+    except ValueError:
+        mode = ValidationMode.CORRECT
+
+    # Run validation
+    result = _validator_engine.validate(
+        raw_address=request.address,
+        mode=mode,
+        context=request.context,
+    )
+
+    # Convert component scores
+    component_scores = [
+        ComponentScoreResponse(
+            component=cs.component.value,
+            confidence=cs.confidence.value,
+            score=round(cs.score, 4),
+            original_value=cs.original_value,
+            validated_value=cs.validated_value,
+            was_corrected=cs.was_corrected,
+            was_completed=cs.was_completed,
+            correction_reason=cs.correction_reason,
+            alternatives=cs.alternatives,
+        )
+        for cs in result.component_scores
+    ]
+
+    # Convert issues
+    issues = [
+        ValidationIssueResponse(
+            severity=issue.severity,
+            component=issue.component.value if issue.component else None,
+            message=issue.message,
+            suggestion=issue.suggestion,
+            auto_fixable=issue.auto_fixable,
+        )
+        for issue in result.issues
+    ]
+
+    return EnhancedValidateResponse(
+        is_valid=result.is_valid,
+        is_deliverable=result.is_deliverable,
+        overall_confidence=round(result.overall_confidence, 4),
+        confidence_percent=round(result.overall_confidence * 100, 1),
+        quality=result.quality.value,
+        status=result.status.value,
+        original=result.original.to_dict(),
+        validated=result.validated.to_dict() if result.validated else None,
+        standardized=result.standardized,
+        component_scores=component_scores,
+        issues=issues,
+        corrections_applied=result.corrections_applied,
+        completions_applied=result.completions_applied,
+        alternatives=[a.to_dict() for a in result.alternatives],
+        is_puerto_rico=result.is_puerto_rico,
+        urbanization_status=result.urbanization_status,
+        metadata=result.metadata,
+    )
+
+
+@router.get("/validate/quick")
+async def validate_address_quick(
+    address: str,
+    mode: str = "correct",
+) -> QuickValidateResponse:
+    """Quick address validation with simplified response.
+
+    Use this endpoint for fast validation checks without full detail.
+    Returns essential information: valid, deliverable, confidence, and formatted address.
+
+    Args:
+        address: Raw address string to validate.
+        mode: Validation mode (validate, complete, correct, standardize).
+
+    Returns:
+        Simplified validation result.
+    """
+    if not _validator_engine:
+        raise HTTPException(status_code=503, detail="Validator engine not initialized")
+
+    try:
+        validation_mode = ValidationMode(mode.lower())
+    except ValueError:
+        validation_mode = ValidationMode.CORRECT
+
+    result = _validator_engine.validate(
+        raw_address=address,
+        mode=validation_mode,
+    )
+
+    # Get primary issue if any
+    primary_issue = None
+    errors = [i for i in result.issues if i.severity == "error"]
+    warnings = [i for i in result.issues if i.severity == "warning"]
+    if errors:
+        primary_issue = errors[0].message
+    elif warnings:
+        primary_issue = warnings[0].message
+
+    return QuickValidateResponse(
+        valid=result.is_valid,
+        deliverable=result.is_deliverable,
+        confidence=round(result.overall_confidence, 4),
+        confidence_percent=round(result.overall_confidence * 100, 1),
+        status=result.status.value,
+        formatted_address=result.standardized,
+        issues_count=len(result.issues),
+        corrections_count=len(result.corrections_applied),
+        primary_issue=primary_issue,
+    )
+
+
+@router.post("/validate/batch")
+async def validate_batch_enhanced(
+    addresses: list[str],
+    mode: str = "correct",
+) -> dict[str, Any]:
+    """Validate multiple addresses with enhanced scoring.
+
+    Args:
+        addresses: List of addresses to validate.
+        mode: Validation mode for all addresses.
+
+    Returns:
+        Batch validation results with summary statistics.
+    """
+    if not _validator_engine:
+        raise HTTPException(status_code=503, detail="Validator engine not initialized")
+
+    try:
+        validation_mode = ValidationMode(mode.lower())
+    except ValueError:
+        validation_mode = ValidationMode.CORRECT
+
+    results = []
+    valid_count = 0
+    deliverable_count = 0
+    total_confidence = 0.0
+
+    for addr in addresses:
+        result = _validator_engine.validate(addr, validation_mode)
+        results.append({
+            "address": addr,
+            "is_valid": result.is_valid,
+            "is_deliverable": result.is_deliverable,
+            "confidence": round(result.overall_confidence, 4),
+            "confidence_percent": round(result.overall_confidence * 100, 1),
+            "status": result.status.value,
+            "standardized": result.standardized,
+            "corrections_count": len(result.corrections_applied),
+            "issues_count": len(result.issues),
+        })
+        if result.is_valid:
+            valid_count += 1
+        if result.is_deliverable:
+            deliverable_count += 1
+        total_confidence += result.overall_confidence
+
+    avg_confidence = total_confidence / len(addresses) if addresses else 0
+
+    return {
+        "success": True,
+        "total": len(addresses),
+        "valid_count": valid_count,
+        "deliverable_count": deliverable_count,
+        "valid_rate": round(valid_count / len(addresses) * 100, 1) if addresses else 0,
+        "deliverable_rate": round(deliverable_count / len(addresses) * 100, 1) if addresses else 0,
+        "average_confidence": round(avg_confidence, 4),
+        "average_confidence_percent": round(avg_confidence * 100, 1),
+        "results": results,
+    }
+
+
+@router.post("/complete")
+async def complete_address(
+    address: str,
+    context: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Complete a partial address with missing components.
+
+    Attempts to fill in missing components like:
+    - City from ZIP code
+    - State from ZIP code
+    - Street type from known streets
+    - Urbanization for Puerto Rico
+
+    Args:
+        address: Partial address to complete.
+        context: Optional hints (zip, state, city).
+
+    Returns:
+        Completed address with completion details.
+    """
+    if not _validator_engine:
+        raise HTTPException(status_code=503, detail="Validator engine not initialized")
+
+    result = _validator_engine.validate(
+        raw_address=address,
+        mode=ValidationMode.COMPLETE,
+        context=context or {},
+    )
+
+    return {
+        "success": result.is_valid,
+        "original": result.original.to_dict(),
+        "completed": result.validated.to_dict() if result.validated else None,
+        "standardized": result.standardized,
+        "completions_made": result.completions_applied,
+        "confidence": round(result.overall_confidence, 4),
+        "confidence_percent": round(result.overall_confidence * 100, 1),
+        "is_complete": len([
+            cs for cs in result.component_scores
+            if cs.confidence.value == "missing"
+        ]) == 0,
+    }
+
+
+@router.post("/correct")
+async def correct_address(
+    address: str,
+    context: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Correct errors in an address.
+
+    Fixes common issues like:
+    - Typos in street types (stret -> street)
+    - Misspelled state names
+    - Formatting issues
+    - ZIP code transpositions
+
+    Args:
+        address: Address to correct.
+        context: Optional hints.
+
+    Returns:
+        Corrected address with correction details.
+    """
+    if not _validator_engine:
+        raise HTTPException(status_code=503, detail="Validator engine not initialized")
+
+    result = _validator_engine.validate(
+        raw_address=address,
+        mode=ValidationMode.CORRECT,
+        context=context or {},
+    )
+
+    return {
+        "success": result.is_valid,
+        "original": result.original.to_dict(),
+        "corrected": result.validated.to_dict() if result.validated else None,
+        "standardized": result.standardized,
+        "corrections_made": result.corrections_applied,
+        "confidence": round(result.overall_confidence, 4),
+        "confidence_percent": round(result.overall_confidence * 100, 1),
+        "was_corrected": len(result.corrections_applied) > 0,
+    }
+
+
+@router.post("/standardize")
+async def standardize_address(
+    address: str,
+) -> dict[str, Any]:
+    """Format an address to USPS standard format.
+
+    Converts address to standardized format:
+    - All caps
+    - Standard abbreviations
+    - Proper field order
+    - Puerto Rico URB line handling
+
+    Args:
+        address: Address to standardize.
+
+    Returns:
+        USPS standardized address.
+    """
+    if not _validator_engine:
+        raise HTTPException(status_code=503, detail="Validator engine not initialized")
+
+    result = _validator_engine.validate(
+        raw_address=address,
+        mode=ValidationMode.STANDARDIZE,
+    )
+
+    return {
+        "success": result.is_valid,
+        "original": address,
+        "standardized": result.standardized,
+        "confidence": round(result.overall_confidence, 4),
+        "is_puerto_rico": result.is_puerto_rico,
     }
 
 

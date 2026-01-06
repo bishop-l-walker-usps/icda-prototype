@@ -190,6 +190,70 @@ export interface StreetSuggestionResult {
   partial: string;
 }
 
+// Enhanced Address Validation Types
+export interface ComponentScore {
+  component: string;
+  confidence: string;  // 'exact' | 'high' | 'medium' | 'low' | 'inferred' | 'missing'
+  score: number;
+  original_value: string | null;
+  validated_value: string | null;
+  was_corrected: boolean;
+  was_completed: boolean;
+  correction_reason: string | null;
+  alternatives: string[];
+}
+
+export interface ValidationIssue {
+  severity: string;  // 'error' | 'warning' | 'info'
+  component: string | null;
+  message: string;
+  suggestion: string | null;
+  auto_fixable: boolean;
+}
+
+export interface EnhancedValidationResponse {
+  // Overall status
+  is_valid: boolean;
+  is_deliverable: boolean;
+  overall_confidence: number;
+  confidence_percent: number;
+  quality: string;  // 'complete' | 'partial' | 'ambiguous' | 'invalid'
+  status: string;   // 'verified' | 'corrected' | 'completed' | 'suggested' | 'unverified'
+
+  // Address data
+  original: Record<string, unknown>;
+  validated: Record<string, unknown> | null;
+  standardized: string | null;
+
+  // Component-level details
+  component_scores: ComponentScore[];
+  issues: ValidationIssue[];
+  corrections_applied: string[];
+  completions_applied: string[];
+
+  // Alternatives
+  alternatives: Record<string, unknown>[];
+
+  // Puerto Rico specific
+  is_puerto_rico: boolean;
+  urbanization_status: string | null;
+
+  // Metadata
+  metadata: Record<string, unknown>;
+}
+
+export interface QuickValidationResponse {
+  valid: boolean;
+  deliverable: boolean;
+  confidence: number;
+  confidence_percent: number;
+  status: string;
+  formatted_address: string | null;
+  issues_count: number;
+  corrections_count: number;
+  primary_issue: string | null;
+}
+
 // Knowledge Base Types
 export interface KnowledgeDocument {
   doc_id: string;
