@@ -1,0 +1,35 @@
+{
+  "family": "icda-prototype",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::YOUR_ACCOUNT_ID:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "icda",
+      "image": "bwalker33/icda-prototype:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {"name": "AWS_REGION", "value": "us-east-1"},
+        {"name": "REDIS_URL", "value": "redis://YOUR_REDIS_ENDPOINT:6379"},
+        {"name": "OPENSEARCH_HOST", "value": "https://YOUR_OPENSEARCH_ENDPOINT"},
+        {"name": "PYTHONUNBUFFERED", "value": "1"}
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
