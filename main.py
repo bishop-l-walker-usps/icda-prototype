@@ -9,9 +9,20 @@ Supports two modes:
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+import logging
+import sys
 
 from dotenv import load_dotenv
 load_dotenv()  # Must be before importing config
+
+# Configure logging - stdout only (no CloudWatch, no file handlers)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger("icda")
 
 from fastapi import FastAPI, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +35,7 @@ import shutil
 
 from icda.config import Config
 from icda.cache import RedisCache
-from icda.embeddings import EmbeddingClient
+from icda.embedding_client import EmbeddingClient
 from icda.vector_index import VectorIndex
 from icda.database import CustomerDB
 from icda.nova import NovaClient
@@ -48,10 +59,20 @@ from icda.address_index import AddressIndex
 from icda.address_completer import NovaAddressCompleter
 from icda.address_pipeline import AddressPipeline
 from icda.address_router import router as address_router, configure_router
+from icda.upload.router import (
+    router as upload_router,
+    validation_router,
+    configure_upload_services,
+)
 from icda.agents.orchestrator import AddressAgentOrchestrator
 from icda.agents.models import AgentCoreMemoryConfig
 from icda.indexes.zip_database import ZipDatabase
 from icda.indexes.address_vector_index import AddressVectorIndex
+from icda.indexes.redis_vector_index import RedisAddressIndex
+from icda.embeddings.address_embedder import AddressEmbedder
+from icda.llm.nova_reranker import NovaAddressReranker
+from icda.address_completion_pipeline import AddressCompletionPipeline, CompletionSource
+from icda.completion_router import router as completion_router, configure_completion_router
 
 cfg = Config()  # Fresh instance after dotenv loaded
 
@@ -83,6 +104,12 @@ _address_pipeline: AddressPipeline = None
 _zip_database: ZipDatabase = None
 _address_vector_index: AddressVectorIndex = None
 _orchestrator: AddressAgentOrchestrator = None
+
+# Address completion pipeline (Redis + Titan + Nova)
+_completion_pipeline: AddressCompletionPipeline = None
+_address_embedder: AddressEmbedder = None
+_redis_vector_index: RedisAddressIndex = None
+_nova_reranker: NovaAddressReranker = None
 
 # LLM Enforcer global (supports any secondary LLM provider)
 _enforcer: LLMEnforcer = None
@@ -166,7 +193,7 @@ async def auto_index_knowledge_documents(knowledge_manager: KnowledgeManager, st
         try:
             current_hash = compute_file_hash(filepath)
         except Exception as e:
-            print(f"  [ERROR] Hash failed: {filename} - {e}")
+            logger.error(f"Hash failed: {filename} - {e}")
             failed += 1
             continue
 
@@ -188,7 +215,7 @@ async def auto_index_knowledge_documents(knowledge_manager: KnowledgeManager, st
             )
 
             if result.get("success"):
-                print(f"  [OK] Indexed: {filename} ({result.get('chunks_indexed', 0)} chunks)")
+                logger.info(f"Indexed: {filename} ({result.get('chunks_indexed', 0)} chunks)")
                 update_file_state(
                     state,
                     filename,
@@ -198,10 +225,10 @@ async def auto_index_knowledge_documents(knowledge_manager: KnowledgeManager, st
                 )
                 indexed += 1
             else:
-                print(f"  [FAIL] Failed: {filename} - {result.get('error')}")
+                logger.warning(f"Index failed: {filename} - {result.get('error')}")
                 failed += 1
         except Exception as e:
-            print(f"  [ERROR] Error: {filename} - {e}")
+            logger.error(f"Index error: {filename} - {e}")
             failed += 1
 
     # Clean up orphaned entries (files that were deleted)
@@ -211,10 +238,10 @@ async def auto_index_knowledge_documents(knowledge_manager: KnowledgeManager, st
         if doc_id:
             try:
                 await knowledge_manager.delete_document(doc_id)
-                print(f"  [CLEANUP] Removed orphan: {orphan_path}")
+                logger.info(f"Removed orphan: {orphan_path}")
                 orphans_removed += 1
             except Exception as e:
-                print(f"  [ERROR] Failed to remove orphan: {orphan_path} - {e}")
+                logger.error(f"Failed to remove orphan: {orphan_path} - {e}")
         remove_file_state(state, orphan_path)
 
     # Save updated state
@@ -230,24 +257,23 @@ async def lifespan(app: FastAPI):
     global _zip_database, _address_vector_index, _orchestrator
     global _enforcer, _download_manager, _index_state, _progress_tracker
 
-    print("\n" + "="*50)
-    print("  ICDA Startup")
-    print("="*50 + "\n")
+    logger.info("=" * 50)
+    logger.info("ICDA Startup")
+    logger.info("=" * 50)
 
     # Startup - Redis is REQUIRED
     _cache = RedisCache(cfg.cache_ttl)
     await _cache.connect(cfg.redis_url)
     # Clear stale cache entries on startup to ensure fresh responses
     await _cache.clear()
-    print("  Cache cleared on startup (removing stale entries)")
+    logger.info("Cache cleared on startup (removing stale entries)")
     if not _cache.available:
-        print("\n[FATAL] Redis is REQUIRED but not available!")
-        print("        Start Redis with: docker-compose up -d redis")
+        logger.critical("Redis is REQUIRED but not available! Start Redis with: docker-compose up -d redis")
         raise RuntimeError("Redis is required for ICDA")
 
     # Initialize progress tracker for real-time indexing feedback
     _progress_tracker = ProgressTracker(_cache)
-    print(f"  Progress tracker: {'enabled' if _progress_tracker.available else 'disabled (no Redis)'}")
+    logger.info(f"Progress tracker: {'enabled' if _progress_tracker.available else 'disabled (no Redis)'}")
 
     _embedder = EmbeddingClient(cfg.aws_region, cfg.titan_embed_model, cfg.embed_dimensions)
 
@@ -255,13 +281,12 @@ async def lifespan(app: FastAPI):
     _vector_index = VectorIndex(_embedder, cfg.opensearch_index)
     await _vector_index.connect(cfg.opensearch_host, cfg.aws_region)
     if not _vector_index.available:
-        print("\n[FATAL] OpenSearch is REQUIRED but not available!")
-        print("        Start OpenSearch with: docker-compose up -d opensearch")
+        logger.critical("OpenSearch is REQUIRED but not available! Start OpenSearch with: docker-compose up -d opensearch")
         raise RuntimeError("OpenSearch is required for ICDA")
 
     _db = CustomerDB(BASE_DIR / "customer_data.json")
-    print(f"Customer database: {len(_db.customers)} customers loaded")
-    print(f"  Available states: {', '.join(_db.get_available_states()[:10])}{'...' if len(_db.available_states) > 10 else ''}")
+    logger.info(f"Customer database: {len(_db.customers)} customers loaded")
+    logger.info(f"Available states: {', '.join(_db.get_available_states()[:10])}{'...' if len(_db.available_states) > 10 else ''}")
 
     # ============================================================
     # AUTO-INDEX: Sync customer data to OpenSearch if needed
@@ -276,31 +301,31 @@ async def lifespan(app: FastAPI):
         
         # Reindex if counts don't match or index is empty
         if indexed_count != db_count:
-            print(f"\n  Auto-indexing customers (DB: {db_count:,}, Index: {indexed_count:,})...")
+            logger.info(f"Auto-indexing customers (DB: {db_count:,}, Index: {indexed_count:,})...")
             result = await _vector_index.index_customers(_db.customers, batch_size=100)
-            print(f"  Indexed {result.get('indexed', 0):,} customers into OpenSearch")
+            logger.info(f"Indexed {result.get('indexed', 0):,} customers into OpenSearch")
             if result.get('errors', 0) > 0:
-                print(f"  Warnings: {result['errors']} indexing errors")
+                logger.warning(f"Indexing warnings: {result['errors']} errors")
         else:
-            print(f"  Customer index: {indexed_count:,} customers (in sync)")
+            logger.info(f"Customer index: {indexed_count:,} customers (in sync)")
     else:
-        print("  Customer indexing skipped (OpenSearch or embeddings not available)")
+        logger.info("Customer indexing skipped (OpenSearch or embeddings not available)")
 
     _sessions = SessionManager(_cache)
 
     # Initialize download token manager
     _download_manager = DownloadTokenManager(_cache)
-    print(f"Download token manager: threshold={_download_manager.pagination_threshold}, preview={_download_manager.preview_size}")
+    logger.info(f"Download token manager: threshold={_download_manager.pagination_threshold}, preview={_download_manager.preview_size}")
 
     # Initialize address verification
-    print("\nInitializing address verification...")
+    logger.info("Initializing address verification...")
     _address_index = AddressIndex()
     _address_index.build_from_customers(_db.customers)
-    print(f"  Address index: {_address_index.total_addresses} addresses")
+    logger.info(f"Address index: {_address_index.total_addresses} addresses")
 
     _zip_database = ZipDatabase()
     _zip_database.build_from_customers(_db.customers)
-    print(f"  ZIP database: {_zip_database.total_zips} ZIPs")
+    logger.info(f"ZIP database: {_zip_database.total_zips} ZIPs")
 
     _address_completer = NovaAddressCompleter(cfg.aws_region, cfg.nova_model, _address_index)
     _address_pipeline = AddressPipeline(_address_index, _address_completer)
@@ -310,7 +335,7 @@ async def lifespan(app: FastAPI):
         _address_vector_index = AddressVectorIndex(_embedder)
         connected = await _address_vector_index.connect(cfg.opensearch_host, cfg.aws_region)
         if connected:
-            print("  Address vector index: connected")
+            logger.info("Address vector index: connected")
         else:
             _address_vector_index = None
 
@@ -320,10 +345,61 @@ async def lifespan(app: FastAPI):
         vector_index=_address_vector_index,
     )
     configure_router(_address_pipeline, _orchestrator)
-    print("  Address verification: ready")
+    logger.info("Address verification: ready")
+
+    # Initialize address completion pipeline (Redis + Titan + Nova)
+    logger.info("Initializing address completion pipeline...")
+    _address_embedder = AddressEmbedder(
+        redis_client=_cache.client if _cache.available else None,
+        region=cfg.aws_region,
+        model=cfg.titan_embed_model,
+        dimensions=cfg.embed_dimensions
+    )
+
+    _redis_vector_index = None
+    if _cache.available and _address_embedder.available:
+        _redis_vector_index = RedisAddressIndex(_cache.client, _address_embedder)
+        redis_vector_available = await _redis_vector_index.initialize()
+        if redis_vector_available:
+            logger.info("  Redis vector index: available (Redis Stack)")
+        else:
+            logger.info("  Redis vector index: not available (install Redis Stack for vector search)")
+            _redis_vector_index = None
+
+    _nova_reranker = NovaAddressReranker(
+        region=cfg.aws_region,
+        model=cfg.nova_lite_model
+    )
+
+    _completion_pipeline = AddressCompletionPipeline(
+        redis_client=_cache.client if _cache.available else None,
+        embedder=_address_embedder,
+        vector_index=_redis_vector_index,
+        reranker=_nova_reranker,
+        cache_ttl=cfg.cache_ttl,
+        vector_confidence_threshold=cfg.completion_vector_threshold,
+        min_confidence=cfg.completion_min_confidence
+    )
+
+    configure_completion_router(
+        pipeline=_completion_pipeline,
+        vector_index=_redis_vector_index,
+        embedder=_address_embedder,
+        db=_db
+    )
+    logger.info(f"  Address completion pipeline: {'ready' if _completion_pipeline.available else 'limited (no embeddings)'}")
+
+    # Initialize bulk upload/validation services
+    logger.info("Initializing bulk upload/validation services...")
+    configure_upload_services(
+        embedding_client=_embedder,
+        opensearch_client=_vector_index.client if _vector_index and _vector_index.available else None,
+        nova_client=None  # Will initialize lazily
+    )
+    logger.info("Bulk upload/validation: ready")
 
     # Initialize knowledge base BEFORE NovaClient so it can use RAG
-    print("\nInitializing knowledge base...")
+    logger.info("Initializing knowledge base...")
     opensearch_client = _vector_index.client if _vector_index.available else None
     _knowledge = KnowledgeManager(_embedder, opensearch_client)
     await _knowledge.ensure_index()
@@ -332,19 +408,19 @@ async def lifespan(app: FastAPI):
     # Load index state for hash-based change detection
     _index_state = load_index_state(INDEX_STATE_FILE)
     if KNOWLEDGE_DIR.exists():
-        print("Auto-indexing knowledge documents from /knowledge folder...")
+        logger.info("Auto-indexing knowledge documents from /knowledge folder...")
         result = await auto_index_knowledge_documents(_knowledge, _index_state)
         if result["indexed"]:
-            print(f"  New/Modified: {result['indexed']}")
+            logger.info(f"New/Modified: {result['indexed']}")
         if result["skipped"]:
-            print(f"  Unchanged (skipped): {result['skipped']}")
+            logger.debug(f"Unchanged (skipped): {result['skipped']}")
         if result.get("orphans_removed"):
-            print(f"  Orphans removed: {result['orphans_removed']}")
+            logger.info(f"Orphans removed: {result['orphans_removed']}")
         if result["failed"]:
-            print(f"  Failed: {result['failed']}")
+            logger.warning(f"Failed: {result['failed']}")
 
     stats = await _knowledge.get_stats()
-    print(f"  Knowledge base: {stats.get('unique_documents', 0)} docs, {stats.get('total_chunks', 0)} chunks ({stats.get('backend', 'unknown')})")
+    logger.info(f"Knowledge base: {stats.get('unique_documents', 0)} docs, {stats.get('total_chunks', 0)} chunks ({stats.get('backend', 'unknown')})")
 
     # Start knowledge file watcher for auto-indexing new files
     async def index_file_callback(filepath: Path) -> dict:
@@ -486,6 +562,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="ICDA", version="0.7.0", lifespan=lifespan)
 app.include_router(address_router)
+app.include_router(upload_router)
+app.include_router(validation_router)
+app.include_router(completion_router)
 
 app.add_middleware(
     CORSMiddleware,

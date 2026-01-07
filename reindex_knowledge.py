@@ -32,7 +32,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from icda.config import Config
-from icda.embeddings import EmbeddingClient
+from icda.embedding_client import EmbeddingClient
 from icda.knowledge import KnowledgeManager
 from icda.knowledge_index_state import (
     compute_file_hash, load_index_state, save_index_state,

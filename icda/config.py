@@ -124,6 +124,20 @@ class Config:
         default_factory=lambda: _parse_float(getenv("C_LIBRARY_TIMEOUT", ""), 30.0)
     )
 
+    # ==================== Address Completion Pipeline ====================
+    # Vector confidence threshold - skip Nova reranking if vector score >= this
+    completion_vector_threshold: float = field(
+        default_factory=lambda: _parse_float(getenv("COMPLETION_VECTOR_THRESHOLD", ""), 0.85)
+    )
+    # Minimum confidence to return a completion result
+    completion_min_confidence: float = field(
+        default_factory=lambda: _parse_float(getenv("COMPLETION_MIN_CONFIDENCE", ""), 0.5)
+    )
+    # Enable Redis vector search (requires Redis Stack with RediSearch module)
+    enable_redis_vector: bool = field(
+        default_factory=lambda: _parse_bool(getenv("ENABLE_REDIS_VECTOR", ""), True)
+    )
+
     # ==================== Feature Flags ====================
     enable_federation: bool = field(
         default_factory=lambda: _parse_bool(getenv("ENABLE_FEDERATION", ""), True)
