@@ -425,9 +425,9 @@ class AddressValidatorEngine:
             )
             is_deliverable = overall_confidence >= self.THRESHOLD_DELIVERABLE and is_valid
 
-            # Step 10: Generate standardized format
+            # Step 10: Generate standardized format (even for partial/inferred results)
             standardized = None
-            if is_valid:
+            if completed.street_name or completed.city or completed.zip_code:
                 try:
                     standardized = self._standardize_address(completed)
                 except Exception as e:

@@ -167,6 +167,52 @@ const ComponentScoreDisplay: React.FC<{ score: ComponentScore }> = ({ score }) =
   );
 };
 
+// Build address string from component scores when standardized is not available
+const buildAddressFromComponents = (scores: ComponentScore[]): string => {
+  const getValue = (component: string): string => {
+    const score = scores.find(s => s.component === component);
+    return score?.validated_value || score?.original_value || '';
+  };
+
+  const parts: string[] = [];
+
+  // Urbanization (PR only)
+  const urb = getValue('urbanization');
+  if (urb) parts.push(`URB ${urb}`);
+
+  // Street line
+  const streetParts = [
+    getValue('street_number'),
+    getValue('street_name'),
+    getValue('street_type'),
+  ].filter(Boolean);
+  if (streetParts.length > 0) parts.push(streetParts.join(' '));
+
+  // Unit
+  const unit = getValue('unit');
+  if (unit) parts.push(unit);
+
+  // City, State ZIP
+  const city = getValue('city');
+  const state = getValue('state');
+  const zip = getValue('zip_code');
+
+  const cszParts: string[] = [];
+  if (city) cszParts.push(city);
+  if (state) cszParts.push(state);
+  if (zip) cszParts.push(zip);
+
+  if (cszParts.length > 0) {
+    if (city && (state || zip)) {
+      parts.push(`${city}, ${[state, zip].filter(Boolean).join(' ')}`);
+    } else {
+      parts.push(cszParts.join(' '));
+    }
+  }
+
+  return parts.join(', ') || 'Address components shown below';
+};
+
 export const Validator: React.FC<ValidatorProps> = ({ open, onClose }) => {
   const [address, setAddress] = useState('');
   const [mode, setMode] = useState<ValidationMode>('correct');
@@ -352,14 +398,15 @@ export const Validator: React.FC<ValidatorProps> = ({ open, onClose }) => {
               {/* Confidence Bar */}
               <ConfidenceBar value={result.overall_confidence} label="Overall Confidence" />
 
-              {/* Standardized Address */}
-              {result.standardized && (
+              {/* Standardized/Inferred Address Display */}
+              {(result.standardized || result.component_scores.length > 0) && (
                 <Box sx={{ mt: 2 }}>
                   <Typography variant="caption" color="text.secondary">
                     {result.status === 'verified' ? 'Verified Address:' :
                      result.status === 'corrected' ? 'Corrected Address:' :
                      result.status === 'completed' ? 'Completed Address:' :
-                     'Standardized Address:'}
+                     result.status === 'suggested' ? 'Suggested Address:' :
+                     'Inferred Address:'}
                   </Typography>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
                     <Typography
@@ -373,10 +420,10 @@ export const Validator: React.FC<ValidatorProps> = ({ open, onClose }) => {
                         flex: 1,
                       }}
                     >
-                      {result.standardized}
+                      {result.standardized || buildAddressFromComponents(result.component_scores)}
                     </Typography>
                     <Tooltip title={copied ? 'Copied!' : 'Copy to clipboard'}>
-                      <IconButton size="small" onClick={() => handleCopy(result.standardized!)}>
+                      <IconButton size="small" onClick={() => handleCopy(result.standardized || buildAddressFromComponents(result.component_scores))}>
                         <CopyIcon fontSize="small" />
                       </IconButton>
                     </Tooltip>
