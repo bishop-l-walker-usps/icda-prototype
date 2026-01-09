@@ -42,6 +42,7 @@ from icda.nova import NovaClient
 from icda.router import Router
 from icda.session import SessionManager
 from icda.knowledge import KnowledgeManager
+from icda.redis_stack import RedisStackClient
 from icda.knowledge_watcher import KnowledgeWatcher
 from icda.knowledge_index_state import (
     compute_file_hash, load_index_state, save_index_state,
@@ -73,6 +74,7 @@ from icda.embeddings.address_embedder import AddressEmbedder
 from icda.llm.nova_reranker import NovaAddressReranker
 from icda.address_completion_pipeline import AddressCompletionPipeline, CompletionSource
 from icda.completion_router import router as completion_router, configure_completion_router
+from icda.redis_stack.router import router as redis_stack_router, configure_router as configure_redis_stack_router
 
 cfg = Config()  # Fresh instance after dotenv loaded
 
@@ -119,6 +121,9 @@ _download_manager: DownloadTokenManager = None
 
 # Progress Tracker global (for real-time indexing progress)
 _progress_tracker: ProgressTracker = None
+
+# Redis Stack unified client (provides all Redis Stack modules)
+_redis_stack: RedisStackClient = None
 
 
 def _extract_tags_from_content(content: str, filepath: Path) -> list[str]:
@@ -255,7 +260,7 @@ async def lifespan(app: FastAPI):
     global _cache, _embedder, _vector_index, _db, _nova, _sessions, _router, _knowledge, _knowledge_watcher
     global _address_index, _address_completer, _address_pipeline
     global _zip_database, _address_vector_index, _orchestrator
-    global _enforcer, _download_manager, _index_state, _progress_tracker
+    global _enforcer, _download_manager, _index_state, _progress_tracker, _redis_stack
 
     logger.info("=" * 50)
     logger.info("ICDA Startup")
@@ -275,6 +280,17 @@ async def lifespan(app: FastAPI):
     _progress_tracker = ProgressTracker(_cache)
     logger.info(f"Progress tracker: {'enabled' if _progress_tracker.available else 'disabled (no Redis)'}")
 
+    # Initialize Redis Stack unified client (provides all Redis Stack modules)
+    _redis_stack = RedisStackClient()
+    redis_modules = await _redis_stack.connect(cfg.redis_url)
+    if _redis_stack._connected:
+        enabled = [k for k, v in redis_modules.items() if v and k != "connected"]
+        logger.info(f"Redis Stack modules: {', '.join(enabled) if enabled else 'base only'}")
+        # Configure Redis Stack router (will also get _db later)
+        configure_redis_stack_router(_redis_stack)
+    else:
+        logger.info("Redis Stack: connection failed, using base Redis only")
+
     _embedder = EmbeddingClient(cfg.aws_region, cfg.titan_embed_model, cfg.embed_dimensions)
 
     # OpenSearch is REQUIRED
@@ -288,26 +304,32 @@ async def lifespan(app: FastAPI):
     logger.info(f"Customer database: {len(_db.customers)} customers loaded")
     logger.info(f"Available states: {', '.join(_db.get_available_states()[:10])}{'...' if len(_db.available_states) > 10 else ''}")
 
+    # Update Redis Stack router with database for suggestion building
+    if _redis_stack and _redis_stack._connected:
+        configure_redis_stack_router(_redis_stack, _db)
+
     # ============================================================
-    # AUTO-INDEX: Sync customer data to OpenSearch if needed
-    # This ensures the vector index stays in sync when you:
-    # - Switch to a different JSON file
-    # - Connect to a database
-    # - Update the customer data
+    # CUSTOMER INDEX: Check index status only (no auto-reindex)
+    # Reindexing is only triggered via API endpoint, not on startup.
+    # This prevents long startup times and unnecessary reindexing.
     # ============================================================
     if _vector_index.available and _embedder.available:
-        indexed_count = await _vector_index.customer_count()
-        db_count = len(_db.customers)
-        
-        # Reindex if counts don't match or index is empty
-        if indexed_count != db_count:
-            logger.info(f"Auto-indexing customers (DB: {db_count:,}, Index: {indexed_count:,})...")
-            result = await _vector_index.index_customers(_db.customers, batch_size=100)
-            logger.info(f"Indexed {result.get('indexed', 0):,} customers into OpenSearch")
-            if result.get('errors', 0) > 0:
-                logger.warning(f"Indexing warnings: {result['errors']} errors")
-        else:
-            logger.info(f"Customer index: {indexed_count:,} customers (in sync)")
+        try:
+            indexed_count = await asyncio.wait_for(
+                _vector_index.customer_count(),
+                timeout=10.0  # Quick timeout - don't block startup
+            )
+            db_count = len(_db.customers)
+            if indexed_count == 0:
+                logger.warning(f"Customer index: EMPTY (POST /api/admin/index/reindex?index_name=customers to populate)")
+            elif indexed_count != db_count:
+                logger.info(f"Customer index: {indexed_count:,} customers (DB: {db_count:,})")
+            else:
+                logger.info(f"Customer index: {indexed_count:,} customers (in sync)")
+        except asyncio.TimeoutError:
+            logger.warning("Customer index: count check timed out (OpenSearch may be slow)")
+        except Exception as e:
+            logger.warning(f"Customer index: status check failed - {e}")
     else:
         logger.info("Customer indexing skipped (OpenSearch or embeddings not available)")
 
@@ -359,7 +381,15 @@ async def lifespan(app: FastAPI):
     _redis_vector_index = None
     if _cache.available and _address_embedder.available:
         _redis_vector_index = RedisAddressIndex(_cache.client, _address_embedder)
-        redis_vector_available = await _redis_vector_index.initialize()
+        try:
+            redis_vector_available = await asyncio.wait_for(
+                _redis_vector_index.initialize(),
+                timeout=10.0  # 10 second timeout for Redis Stack initialization
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Redis vector index: initialization timed out (10s)")
+            redis_vector_available = False
+
         if redis_vector_available:
             logger.info("  Redis vector index: available (Redis Stack)")
         else:
@@ -554,17 +584,20 @@ async def lifespan(app: FastAPI):
     # Shutdown
     if _knowledge_watcher:
         _knowledge_watcher.stop()
+    if _redis_stack:
+        await _redis_stack.close()
     await _cache.close()
     await _vector_index.close()
     if _address_vector_index:
         await _address_vector_index.close()
 
 
-app = FastAPI(title="ICDA", version="0.7.0", lifespan=lifespan)
+app = FastAPI(title="ICDA", version="0.8.0", lifespan=lifespan)
 app.include_router(address_router)
 app.include_router(upload_router)
 app.include_router(validation_router)
 app.include_router(completion_router)
+app.include_router(redis_stack_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -775,10 +808,64 @@ async def hybrid_search(q: str, limit: int = 10, state: str = None, min_moves: i
 
 @app.get("/api/index/status")
 async def index_status():
+    """Get comprehensive index status including sync state and active operations.
+
+    Returns:
+        - opensearch_available: Whether OpenSearch is connected
+        - indexed_count: Number of customers in the index
+        - db_count: Number of customers in the database
+        - sync_status: 'synced', 'out_of_sync', or 'empty'
+        - sync_diff: Difference between index and DB counts
+        - indexing_active: Whether a reindex operation is in progress
+        - indexing_progress: Progress details if indexing is active
+    """
+    indexed_count = 0
+    db_count = len(_db.customers) if _db else 0
+
+    if _vector_index and _vector_index.available:
+        try:
+            indexed_count = await _vector_index.customer_count()
+        except Exception:
+            indexed_count = 0
+
+    # Determine sync status
+    if indexed_count == 0:
+        sync_status = "empty"
+    elif indexed_count == db_count:
+        sync_status = "synced"
+    else:
+        sync_status = "out_of_sync"
+
+    # Check for active indexing operations
+    indexing_active = False
+    indexing_progress = None
+
+    if _progress_tracker:
+        operations = await _progress_tracker.get_active_operations()
+        for op in operations:
+            if op.operation_type == "customer_index":
+                indexing_active = True
+                indexing_progress = {
+                    "operation_id": op.operation_id,
+                    "processed": op.processed_items,
+                    "total": op.total_items,
+                    "percent": round((op.processed_items / op.total_items * 100) if op.total_items > 0 else 0, 1),
+                    "phase": op.current_phase,
+                    "elapsed_seconds": op.elapsed_seconds,
+                    "items_per_second": round(op.items_per_second, 1) if op.items_per_second else 0,
+                    "estimated_remaining_seconds": op.estimated_remaining_seconds,
+                }
+                break
+
     return {
         "opensearch_available": _vector_index.available if _vector_index else False,
         "customer_index": _vector_index.customer_index if _vector_index else None,
-        "indexed_customers": await _vector_index.customer_count() if _vector_index else 0
+        "indexed_count": indexed_count,
+        "db_count": db_count,
+        "sync_status": sync_status,
+        "sync_diff": indexed_count - db_count,
+        "indexing_active": indexing_active,
+        "indexing_progress": indexing_progress,
     }
 
 
@@ -923,6 +1010,143 @@ async def reindex_customer_data(force: bool = False, async_mode: bool = False):
     }
 
 
+@app.post("/api/data/sync")
+async def sync_customer_data(async_mode: bool = False):
+    """Incremental sync - only index NEW/CHANGED customers (delta-based).
+
+    This is much faster than full reindex when you've added a few records.
+    It compares CRIDs in the database vs OpenSearch and only processes the delta.
+
+    Use this when:
+    - You've added new customers to customer_data.json
+    - You want fast sync without re-embedding all 50k+ records
+
+    Use /api/data/reindex?force=true for full reindex when:
+    - Index is corrupted
+    - You want to regenerate all embeddings
+
+    Args:
+        async_mode: If True, run in background and return operation_id.
+
+    Returns:
+        Sync results with counts of added/deleted records.
+    """
+    if not _vector_index or not _vector_index.available:
+        return {"success": False, "error": "OpenSearch not available"}
+    if not _embedder or not _embedder.available:
+        return {"success": False, "error": "Embeddings not available"}
+    if not _db:
+        return {"success": False, "error": "Database not loaded"}
+
+    # First, compute the delta to show what will be synced
+    delta = await _vector_index.compute_index_delta(_db.customers)
+
+    if delta["in_sync"]:
+        return {
+            "success": True,
+            "message": "Index already in sync - no changes needed",
+            "db_count": delta["db_count"],
+            "indexed_count": delta["indexed_count"],
+            "to_add": 0,
+            "to_delete": 0
+        }
+
+    # Async mode: run in background with progress tracking
+    if async_mode and _progress_tracker:
+        total_work = delta["to_add_count"] + delta["to_delete_count"]
+        op_id = await _progress_tracker.start_operation(
+            operation_type="customer_sync",
+            total_items=total_work,
+            total_batches=total_work // 50 + 1,
+        )
+
+        async def run_sync():
+            try:
+                await _progress_tracker.update_progress(op_id, phase="Syncing customers (incremental)")
+
+                async def on_progress(processed: int, total: int):
+                    await _progress_tracker.update_progress(
+                        op_id,
+                        processed=processed,
+                        message=f"Synced {processed:,} of {total:,} new customers",
+                    )
+
+                result = await _vector_index.index_customers_incremental(
+                    _db.customers,
+                    batch_size=50,
+                    progress_callback=on_progress
+                )
+
+                await _progress_tracker.complete_operation(
+                    op_id,
+                    message=f"Sync complete: {result.get('indexed', 0)} added, {result.get('deleted', 0)} deleted"
+                )
+            except Exception as e:
+                await _progress_tracker.fail_operation(op_id, str(e))
+
+        import asyncio
+        asyncio.create_task(run_sync())
+
+        return {
+            "success": True,
+            "message": "Incremental sync started in background",
+            "operation_id": op_id,
+            "delta": {
+                "to_add": delta["to_add_count"],
+                "to_delete": delta["to_delete_count"],
+            },
+            "stream_url": f"/api/data/reindex/stream/{op_id}",
+            "status_url": f"/api/data/reindex/status/{op_id}",
+        }
+
+    # Synchronous mode
+    result = await _vector_index.index_customers_incremental(_db.customers, batch_size=50)
+
+    return {
+        "success": result.get("success", False),
+        "message": result.get("message", "Sync complete"),
+        "indexed": result.get("indexed", 0),
+        "deleted": result.get("deleted", 0),
+        "failed": result.get("failed", 0),
+        "total_in_index": result.get("total_in_index", 0),
+        "db_count": len(_db.customers),
+        "available_states": _db.get_available_states()
+    }
+
+
+@app.get("/api/data/delta")
+async def get_index_delta():
+    """Preview what would be synced without actually syncing.
+
+    Use this to check if sync is needed before running it.
+
+    Returns:
+        Delta information showing what's new/deleted.
+    """
+    if not _vector_index or not _vector_index.available:
+        return {"success": False, "error": "OpenSearch not available"}
+    if not _db:
+        return {"success": False, "error": "Database not loaded"}
+
+    delta = await _vector_index.compute_index_delta(_db.customers)
+
+    # Get sample CRIDs for preview (don't return all 2000)
+    sample_to_add = list(delta["to_add"])[:10]
+    sample_to_delete = list(delta["to_delete"])[:10]
+
+    return {
+        "success": True,
+        "in_sync": delta["in_sync"],
+        "db_count": delta["db_count"],
+        "indexed_count": delta["indexed_count"],
+        "to_add_count": delta["to_add_count"],
+        "to_delete_count": delta["to_delete_count"],
+        "sample_to_add": sample_to_add,
+        "sample_to_delete": sample_to_delete,
+        "recommendation": "Use POST /api/data/sync to apply changes" if not delta["in_sync"] else "No sync needed"
+    }
+
+
 @app.get("/api/data/reindex/stream/{operation_id}")
 async def stream_reindex_progress(operation_id: str):
     """Stream reindex progress via Server-Sent Events.
@@ -982,6 +1206,197 @@ async def get_active_reindex_operations():
         "operations": [op.to_dict() for op in operations],
         "count": len(operations),
     }
+
+
+# ==================== Customer Index CRUD API ====================
+# Incremental indexing: add, update, delete individual customers
+# without requiring full reindex
+
+class CustomerData(BaseModel):
+    """Customer data for indexing."""
+    crid: str | None = None  # Optional - can be set from path param
+    name: str
+    address: str
+    city: str
+    state: str
+    zip: str
+    customer_type: str = "RESIDENTIAL"
+    status: str = "ACTIVE"
+    move_count: int = 0
+    last_move_date: str | None = None
+    created_date: str | None = None
+
+
+class BulkCustomersRequest(BaseModel):
+    """Request body for bulk customer indexing."""
+    customers: list[CustomerData]
+
+
+class BulkDeleteRequest(BaseModel):
+    """Request body for bulk customer deletion."""
+    crids: list[str]
+
+
+# IMPORTANT: Bulk routes MUST come before {crid} routes to avoid path parameter matching "bulk"
+
+@app.post("/api/customers/bulk")
+async def bulk_add_customers_to_index(req: BulkCustomersRequest):
+    """Add multiple customers to the search index incrementally.
+
+    This is for INCREMENTAL bulk adds - when adding a batch of new customers.
+    Use /api/data/reindex for full reindex when data source changes completely.
+
+    Args:
+        req: BulkCustomersRequest with list of customers to add/update.
+
+    Returns:
+        Count of successfully indexed customers.
+    """
+    if not _vector_index or not _vector_index.available:
+        return {"success": False, "error": "OpenSearch not available"}
+
+    if not req.customers:
+        return {"success": False, "error": "No customers provided"}
+
+    indexed = 0
+    failed = 0
+    errors = []
+
+    for customer in req.customers:
+        crid = customer.crid
+        if not crid:
+            failed += 1
+            errors.append("Missing crid")
+            continue
+
+        customer_dict = customer.model_dump()
+        success = await _vector_index.index_customer(customer_dict)
+        if success:
+            indexed += 1
+        else:
+            failed += 1
+            errors.append(f"Failed: {crid}")
+
+    return {
+        "success": True,
+        "indexed": indexed,
+        "failed": failed,
+        "total": len(req.customers),
+        "errors": errors[:10] if errors else []  # Limit error messages
+    }
+
+
+@app.post("/api/customers/bulk/delete")
+async def bulk_delete_customers_from_index(req: BulkDeleteRequest):
+    """Remove multiple customers from the search index.
+
+    Args:
+        req: BulkDeleteRequest with list of customer IDs to remove.
+
+    Returns:
+        Count of successfully deleted customers.
+    """
+    if not _vector_index or not _vector_index.available:
+        return {"success": False, "error": "OpenSearch not available"}
+
+    if not req.crids:
+        return {"success": False, "error": "No customer IDs provided"}
+
+    deleted = 0
+    failed = 0
+
+    for crid in req.crids:
+        success = await _vector_index.delete_customer(crid)
+        if success:
+            deleted += 1
+        else:
+            failed += 1
+
+    return {
+        "success": True,
+        "deleted": deleted,
+        "failed": failed,
+        "total": len(req.crids)
+    }
+
+
+# Single customer operations (path parameter routes come AFTER bulk routes)
+
+@app.post("/api/customers/{crid}")
+async def add_or_update_customer_index(crid: str, customer: CustomerData):
+    """Add or update a single customer in the search index.
+
+    This is for INCREMENTAL indexing - add/update one customer at a time.
+    Use /api/data/reindex for full reindex when data source changes.
+
+    Args:
+        crid: Customer ID (path parameter)
+        customer: CustomerData with name, address, city, state, zip, etc.
+    """
+    if not _vector_index or not _vector_index.available:
+        return {"success": False, "error": "OpenSearch not available"}
+
+    # Convert to dict and ensure crid matches path
+    customer_dict = customer.model_dump()
+    customer_dict["crid"] = crid
+
+    success = await _vector_index.index_customer(customer_dict)
+    if success:
+        return {
+            "success": True,
+            "message": f"Customer {crid} indexed successfully",
+            "crid": crid
+        }
+    return {"success": False, "error": f"Failed to index customer {crid}"}
+
+
+@app.delete("/api/customers/{crid}")
+async def delete_customer_from_index(crid: str):
+    """Delete a single customer from the search index.
+
+    This is for INCREMENTAL removal - delete one customer at a time.
+    The customer data in the source database is not affected.
+
+    Args:
+        crid: Customer ID to remove from index.
+    """
+    if not _vector_index or not _vector_index.available:
+        return {"success": False, "error": "OpenSearch not available"}
+
+    success = await _vector_index.delete_customer(crid)
+    if success:
+        return {
+            "success": True,
+            "message": f"Customer {crid} removed from index",
+            "crid": crid
+        }
+    return {"success": False, "error": f"Failed to delete customer {crid}"}
+
+
+@app.get("/api/customers/{crid}/indexed")
+async def check_customer_indexed(crid: str):
+    """Check if a customer exists in the search index.
+
+    Args:
+        crid: Customer ID to check.
+
+    Returns:
+        Whether customer is in the index and their indexed data.
+    """
+    if not _vector_index or not _vector_index.available:
+        return {"success": False, "error": "OpenSearch not available", "indexed": False}
+
+    exists = await _vector_index.customer_exists(crid)
+    result = {"success": True, "crid": crid, "indexed": exists}
+
+    if exists:
+        customer = await _vector_index.get_customer(crid)
+        if customer:
+            # Remove embedding from response (too large)
+            customer.pop("embedding", None)
+            result["customer"] = customer
+
+    return result
 
 
 # ==================== Knowledge Base API ====================

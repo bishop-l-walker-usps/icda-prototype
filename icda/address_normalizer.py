@@ -184,17 +184,17 @@ class AddressNormalizer:
         r"\b([A-Za-z]{2})\s*(?:,?\s*\d{5}|\s*$)",
         re.IGNORECASE,
     )
-    # Puerto Rico urbanization pattern - captures text after URB/URBANIZACION
+    # Puerto Rico urbanization pattern - captures text after URB/URBANIZACION/SECTOR/BARRIO
     # until a street indicator (CALLE, AVE, number, comma) or end
     _URB_PATTERN = re.compile(
-        r"\b(?:urb\.?|urbanizacion|urbanización)\s+"
+        r"\b(?:urb\.?|urbanizacion|urbanización|sector|sect\.?|barrio|brro\.?)\s+"
         r"([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-\.]+?)"
-        r"(?=\s*(?:calle|ave|avenida|apt|apartamento|edificio|edif|cond|condominio|res|residencial|\d|,|$))",
+        r"(?=\s*(?:calle|ave|avenida|apt|apartamento|edificio|edif|cond|condominio|res|residencial|parcela|parc|\d|,|$))",
         re.IGNORECASE,
     )
-    # Alternative: captures everything after URB up to common delimiters
+    # Alternative: captures everything after URB/SECTOR/BARRIO up to common delimiters
     _URB_SIMPLE_PATTERN = re.compile(
-        r"\b(?:urb|urbanizacion|urbanización)\s+([A-Za-z][A-Za-z\s]*?)(?:\s+(?:calle|ave|avenida|apt|apartamento|\d)|,|$)",
+        r"\b(?:urb|urbanizacion|urbanización|sector|barrio)\s+([A-Za-z][A-Za-z\s]*?)(?:\s+(?:calle|ave|avenida|apt|apartamento|parcela|\d)|,|$)",
         re.IGNORECASE,
     )
 
@@ -292,8 +292,8 @@ class AddressNormalizer:
     def _extract_urbanization(cls, text: str) -> tuple[str | None, str]:
         """Extract Puerto Rico urbanization from text.
 
-        Urbanization (URB) is a required field for PR addresses that identifies
-        the specific subdivision within a ZIP code area.
+        Urbanization (URB), Sector, or Barrio is a required field for PR addresses
+        that identifies the specific subdivision within a ZIP code area.
 
         Args:
             text: Address text to parse.
@@ -314,9 +314,9 @@ class AddressNormalizer:
         match = cls._URB_SIMPLE_PATTERN.search(text)
         if match:
             urbanization = match.group(1).strip().upper()
-            # Remove URB/URBANIZACION keyword and the urbanization name
+            # Remove URB/URBANIZACION/SECTOR/BARRIO keyword and the urbanization name
             text = re.sub(
-                r"\b(?:urb|urbanizacion|urbanización)\s+" + re.escape(match.group(1)),
+                r"\b(?:urb|urbanizacion|urbanización|sector|barrio)\s+" + re.escape(match.group(1)),
                 "",
                 text,
                 flags=re.IGNORECASE,

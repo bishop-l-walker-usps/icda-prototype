@@ -53,15 +53,27 @@ class RedisAddressIndex:
         self.available = False
         self._index_exists = False
 
-    async def initialize(self) -> bool:
-        """Check if Redis Stack with vector search is available."""
+    async def initialize(self, timeout: float = 5.0) -> bool:
+        """Check if Redis Stack with vector search is available.
+
+        Args:
+            timeout: Maximum time to wait for Redis operations (default 5s)
+        """
         if not self.redis:
             logger.warning("RedisAddressIndex: No Redis client provided")
             return False
 
         try:
-            # Check for RediSearch module
-            modules = await self.redis.module_list()
+            # Check for RediSearch module with timeout protection
+            try:
+                modules = await asyncio.wait_for(
+                    self.redis.module_list(),
+                    timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"RedisAddressIndex: module_list() timed out after {timeout}s")
+                return False
+
             module_names = [m.get("name", "").lower() for m in modules]
 
             if "search" not in module_names and "ft" not in module_names:
@@ -71,10 +83,16 @@ class RedisAddressIndex:
             self.available = True
             logger.info("RedisAddressIndex: Redis Stack vector search available")
 
-            # Check if index exists
+            # Check if index exists with timeout protection
             try:
-                await self.redis.execute_command("FT.INFO", self.INDEX_NAME)
+                await asyncio.wait_for(
+                    self.redis.execute_command("FT.INFO", self.INDEX_NAME),
+                    timeout=timeout
+                )
                 self._index_exists = True
+            except asyncio.TimeoutError:
+                logger.warning(f"RedisAddressIndex: FT.INFO timed out after {timeout}s")
+                self._index_exists = False
             except Exception:
                 self._index_exists = False
 

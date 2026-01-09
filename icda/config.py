@@ -124,6 +124,24 @@ class Config:
         default_factory=lambda: _parse_float(getenv("C_LIBRARY_TIMEOUT", ""), 30.0)
     )
 
+    # ==================== Address Validation Thresholds (UNIFIED) ====================
+    # Exact match - address verified with high certainty
+    address_threshold_exact: float = field(
+        default_factory=lambda: _parse_float(getenv("ADDRESS_THRESHOLD_EXACT", ""), 0.95)
+    )
+    # High confidence - deliverable, minor corrections OK
+    address_threshold_deliverable: float = field(
+        default_factory=lambda: _parse_float(getenv("ADDRESS_THRESHOLD_DELIVERABLE", ""), 0.85)
+    )
+    # Medium confidence - valid but needs review
+    address_threshold_valid: float = field(
+        default_factory=lambda: _parse_float(getenv("ADDRESS_THRESHOLD_VALID", ""), 0.70)
+    )
+    # Minimum to return any result
+    address_threshold_minimum: float = field(
+        default_factory=lambda: _parse_float(getenv("ADDRESS_THRESHOLD_MINIMUM", ""), 0.50)
+    )
+
     # ==================== Address Completion Pipeline ====================
     # Vector confidence threshold - skip Nova reranking if vector score >= this
     completion_vector_threshold: float = field(
@@ -136,6 +154,32 @@ class Config:
     # Enable Redis vector search (requires Redis Stack with RediSearch module)
     enable_redis_vector: bool = field(
         default_factory=lambda: _parse_bool(getenv("ENABLE_REDIS_VECTOR", ""), True)
+    )
+
+    # ==================== Circuit Breaker Settings ====================
+    # Number of failures before circuit opens
+    circuit_breaker_threshold: int = field(
+        default_factory=lambda: _parse_int(getenv("CIRCUIT_BREAKER_THRESHOLD", ""), 3)
+    )
+    # Seconds before attempting to close circuit
+    circuit_breaker_reset_timeout: int = field(
+        default_factory=lambda: _parse_int(getenv("CIRCUIT_BREAKER_RESET_TIMEOUT", ""), 300)
+    )
+    # Max retries for transient failures
+    max_retries: int = field(
+        default_factory=lambda: _parse_int(getenv("MAX_RETRIES", ""), 2)
+    )
+    # Retry backoff base (seconds)
+    retry_backoff_base: float = field(
+        default_factory=lambda: _parse_float(getenv("RETRY_BACKOFF_BASE", ""), 0.5)
+    )
+
+    # ==================== Input Validation Limits ====================
+    max_address_length: int = field(
+        default_factory=lambda: _parse_int(getenv("MAX_ADDRESS_LENGTH", ""), 500)
+    )
+    max_typo_corrections: int = field(
+        default_factory=lambda: _parse_int(getenv("MAX_TYPO_CORRECTIONS", ""), 5)
     )
 
     # ==================== Feature Flags ====================

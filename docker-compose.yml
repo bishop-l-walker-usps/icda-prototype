@@ -8,7 +8,7 @@
 #
 # Services:
 #   - icda:       Main application (FastAPI backend + React frontend)
-#   - redis:      Cache layer (required)
+#   - redis:      Redis Stack - cache + vector + search (required)
 #   - opensearch: Vector search and RAG (required)
 #   - mcp-knowledge: Knowledge RAG server (starts by default)
 #   - mcp-server: Claude CLI MCP server (use --profile mcp)
@@ -91,33 +91,37 @@ services:
           memory: 512M
 
   # ============================================
-  # Redis Cache
+  # Redis Stack (Cache + Vector Search + JSON + Search)
+  # Includes: RedisJSON, RediSearch, RedisGraph, RedisTimeSeries, RedisBloom
+  # RedisInsight UI available at http://localhost:8001
   # ============================================
   redis:
-    image: redis:7-alpine
+    image: redis/redis-stack:latest
     container_name: icda-redis
     ports:
       - "6379:6379"
+      - "8001:8001"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    environment:
+      - REDIS_ARGS=--appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 10s
     restart: unless-stopped
     networks:
       - icda-network
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 512M
+          cpus: "1"
+          memory: 1G
         reservations:
-          cpus: "0.1"
-          memory: 128M
+          cpus: "0.25"
+          memory: 256M
 
   # ============================================
   # OpenSearch Vector Store

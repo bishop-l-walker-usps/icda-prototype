@@ -1,11 +1,11 @@
 """Nova AI-powered address completion and correction.
 
 Supports LITE MODE (no AWS) with fallback to fuzzy matching only.
+Includes circuit breaker protection for resilient operation.
 """
 
 import json
 import logging
-import os
 import re
 from typing import Any
 
@@ -16,6 +16,8 @@ from icda.address_models import (
 )
 from icda.address_index import AddressIndex, MatchResult
 from icda.address_normalizer import AddressNormalizer
+from icda.config import cfg
+from icda.utils.resilience import CircuitBreaker, CircuitOpenError
 
 
 logger = logging.getLogger(__name__)
@@ -114,6 +116,13 @@ For Puerto Rico addresses (ZIP 006-009):
         self._client = None
         self.available = False
 
+        # Circuit breaker for Nova API protection
+        self._circuit_breaker = CircuitBreaker(
+            name="nova_address_completer",
+            threshold=cfg.circuit_breaker_threshold,
+            reset_timeout=cfg.circuit_breaker_reset_timeout,
+        )
+
         # Check if AWS credentials are available (supports default credential chain)
         try:
             import boto3
@@ -135,8 +144,20 @@ For Puerto Rico addresses (ZIP 006-009):
         parsed: ParsedAddress,
         fuzzy_matches: list[MatchResult],
     ) -> VerificationResult:
-        """Use Nova to complete a partial address (or fallback to fuzzy)."""
+        """Use Nova to complete a partial address (or fallback to fuzzy).
+
+        Uses circuit breaker to protect against cascading failures.
+        Falls back to fuzzy matching if Nova is unavailable or circuit is open.
+        """
+        # Check availability and circuit breaker
         if not self.available:
+            return self._fallback_completion(parsed, fuzzy_matches)
+
+        if not self._circuit_breaker.is_available():
+            logger.warning(
+                f"Circuit breaker open for Nova - using fallback. "
+                f"State: {self._circuit_breaker.get_state()}"
+            )
             return self._fallback_completion(parsed, fuzzy_matches)
 
         # Build candidate list for Nova
@@ -144,14 +165,17 @@ For Puerto Rico addresses (ZIP 006-009):
 
         # If we have a ZIP but limited candidates, get more from ZIP
         if parsed.zip_code and len(fuzzy_matches) < 5:
-            zip_addresses = self.index.lookup_by_zip(parsed.zip_code)
-            additional = [
-                f"- {addr.parsed.single_line}"
-                for addr in zip_addresses[:10]
-                if addr not in [m.address for m in fuzzy_matches]
-            ]
-            if additional:
-                candidates += "\n" + "\n".join(additional)
+            try:
+                zip_addresses = self.index.lookup_by_zip(parsed.zip_code)
+                additional = [
+                    f"- {addr.parsed.single_line}"
+                    for addr in zip_addresses[:10]
+                    if addr not in [m.address for m in fuzzy_matches]
+                ]
+                if additional:
+                    candidates += "\n" + "\n".join(additional)
+            except Exception as e:
+                logger.warning(f"Failed to get ZIP candidates: {e}")
 
         prompt = self._COMPLETION_PROMPT.format(
             input_address=parsed.raw,
@@ -168,14 +192,24 @@ For Puerto Rico addresses (ZIP 006-009):
         try:
             from botocore.exceptions import ClientError
             response = self._call_nova(prompt)
+            self._circuit_breaker.record_success()
             return self._parse_completion_response(response, parsed, fuzzy_matches)
         except ClientError as e:
             logger.error(f"Nova API error: {e}")
-            self.available = False
+            self._circuit_breaker.record_failure()
             return self._fallback_completion(parsed, fuzzy_matches)
         except Exception as e:
             logger.error(f"Address completion error: {e}")
+            self._circuit_breaker.record_failure()
             return self._fallback_completion(parsed, fuzzy_matches)
+
+    def get_circuit_state(self) -> dict[str, Any]:
+        """Get circuit breaker state for monitoring."""
+        return self._circuit_breaker.get_state()
+
+    def reset_circuit(self) -> None:
+        """Manually reset the circuit breaker."""
+        self._circuit_breaker.reset()
 
     async def suggest_street_completion(
         self,

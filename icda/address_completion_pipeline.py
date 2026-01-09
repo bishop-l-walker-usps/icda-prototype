@@ -6,6 +6,11 @@ Pipeline flow:
 3. L3 Nova Rerank: Use Nova LLM to select best match from candidates
 
 This provides a fast, accurate, and cost-effective address completion system.
+
+Enhanced with:
+- Retry logic with exponential backoff
+- Unified confidence thresholds from config
+- Robust error handling
 """
 
 import asyncio
@@ -15,6 +20,8 @@ import logging
 from dataclasses import dataclass, asdict
 from enum import Enum
 from typing import Dict, List, Optional, Any
+
+from icda.config import cfg
 
 logger = logging.getLogger(__name__)
 
@@ -172,11 +179,60 @@ class AddressCompletionPipeline:
         if len(self._fallback_cache) < 5000:
             self._fallback_cache[key] = data
 
+    async def _vector_search_with_retry(
+        self,
+        address: str,
+        zip_filter: Optional[str],
+        state_filter: Optional[str],
+        max_retries: int,
+    ) -> List[Any]:
+        """Perform vector search with retry logic for transient failures.
+
+        Args:
+            address: Address query string
+            zip_filter: Optional ZIP code filter
+            state_filter: Optional state filter
+            max_retries: Maximum retry attempts
+
+        Returns:
+            List of candidate matches (empty on failure)
+        """
+        last_error = None
+        retryable_errors = (ConnectionError, TimeoutError, asyncio.TimeoutError)
+
+        for attempt in range(max_retries + 1):
+            try:
+                candidates = await self.vector_index.search(
+                    query=address,
+                    top_k=10,
+                    zip_filter=zip_filter,
+                    state_filter=state_filter,
+                    min_score=self.min_confidence
+                )
+                return candidates
+            except retryable_errors as e:
+                last_error = e
+                if attempt < max_retries:
+                    delay = cfg.retry_backoff_base * (attempt + 1)
+                    logger.warning(
+                        f"Vector search retry {attempt + 1}/{max_retries} "
+                        f"after {type(e).__name__}. Waiting {delay}s"
+                    )
+                    await asyncio.sleep(delay)
+            except Exception as e:
+                # Non-retryable error
+                logger.error(f"Vector search error: {e}")
+                return []
+
+        logger.error(f"Vector search failed after {max_retries} retries: {last_error}")
+        return []
+
     async def complete(
         self,
         address: str,
         use_cache: bool = True,
-        return_suggestions: bool = False
+        return_suggestions: bool = False,
+        max_retries: int | None = None,
     ) -> CompletionResult:
         """Complete a partial address.
 
@@ -184,10 +240,14 @@ class AddressCompletionPipeline:
             address: Partial or incomplete address
             use_cache: Whether to use caching
             return_suggestions: Include alternative suggestions
+            max_retries: Max retry attempts for transient failures (default from config)
 
         Returns:
             CompletionResult with completed address
         """
+        if max_retries is None:
+            max_retries = cfg.max_retries
+
         if not address or not address.strip():
             return CompletionResult(
                 original=address,
@@ -226,18 +286,10 @@ class AddressCompletionPipeline:
         zip_filter = self._extract_zip(address)
         state_filter = self._extract_state(address)
 
-        # L2: Vector search
-        try:
-            candidates = await self.vector_index.search(
-                query=address,
-                top_k=10,
-                zip_filter=zip_filter,
-                state_filter=state_filter,
-                min_score=self.min_confidence
-            )
-        except Exception as e:
-            logger.error(f"Vector search error: {e}")
-            candidates = []
+        # L2: Vector search with retry logic
+        candidates = await self._vector_search_with_retry(
+            address, zip_filter, state_filter, max_retries
+        )
 
         if not candidates:
             return CompletionResult(

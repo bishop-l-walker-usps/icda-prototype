@@ -12,8 +12,15 @@ The engine operates in multiple modes:
 - COMPLETE: Fill in missing components
 - CORRECT: Fix errors while preserving intent
 - STANDARDIZE: Format to USPS standard
+
+Enhanced with:
+- Unified confidence thresholds from config
+- Robust error handling
+- Input sanitization
+- Spanish typo corrections for PR addresses
 """
 
+import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -33,6 +40,10 @@ from icda.address_normalizer import (
     DIRECTIONALS,
     is_puerto_rico_zip,
 )
+from icda.config import cfg
+from icda.utils.resilience import sanitize_address_input
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -110,7 +121,7 @@ ZIP_CITY_STATE: dict[str, tuple[str, str]] = {
     "00983": ("Carolina", "PR"),
 }
 
-# Common address typos and corrections
+# Common address typos and corrections (English)
 COMMON_TYPOS: dict[str, str] = {
     "stret": "street",
     "stree": "street",
@@ -139,6 +150,46 @@ COMMON_TYPOS: dict[str, str] = {
     "appartment": "apartment",
     "suiet": "suite",
     "siute": "suite",
+}
+
+# Spanish typos common in Puerto Rico addresses
+SPANISH_TYPOS: dict[str, str] = {
+    # Urbanization typos
+    "urbanizacion": "urbanizacion",
+    "urbanisacion": "urbanizacion",
+    "urbanizasion": "urbanizacion",
+    "urbanzacion": "urbanizacion",
+    "urbnizacion": "urbanizacion",
+    # Calle (street) typos
+    "cale": "calle",
+    "callel": "calle",
+    "callle": "calle",
+    # Avenida typos
+    "avenuda": "avenida",
+    "avnida": "avenida",
+    "avenid": "avenida",
+    "avendida": "avenida",
+    # Edificio typos
+    "ediicio": "edificio",
+    "edifcio": "edificio",
+    "edficio": "edificio",
+    # Apartamento typos
+    "apartmento": "apartamento",
+    "apartamneto": "apartamento",
+    "apartameto": "apartamento",
+    # Condominio typos
+    "condiminio": "condominio",
+    "condomino": "condominio",
+    "condminio": "condominio",
+    # Residencial typos
+    "residencial": "residencial",
+    "residensial": "residencial",
+    "recidencial": "residencial",
+    # Sector/Barrio typos
+    "sectr": "sector",
+    "sectro": "sector",
+    "barri": "barrio",
+    "bario": "barrio",
 }
 
 # State name typos
@@ -283,6 +334,7 @@ class AddressValidatorEngine:
     - Error correction with change tracking
     - Confidence calculation
     - Fix suggestions
+    - Robust error handling for all operations
     """
 
     # Component weights for overall confidence calculation
@@ -297,11 +349,6 @@ class AddressValidatorEngine:
         AddressComponent.URBANIZATION: 0.02,  # Only for PR
     }
 
-    # Minimum confidence thresholds
-    THRESHOLD_VALID = 0.70
-    THRESHOLD_DELIVERABLE = 0.85
-    THRESHOLD_EXACT = 0.95
-
     def __init__(self, address_index=None):
         """Initialize the validator engine.
 
@@ -309,6 +356,12 @@ class AddressValidatorEngine:
             address_index: Optional AddressIndex for known address lookup.
         """
         self.index = address_index
+        # Use unified thresholds from config
+        self.THRESHOLD_VALID = cfg.address_threshold_valid
+        self.THRESHOLD_DELIVERABLE = cfg.address_threshold_deliverable
+        self.THRESHOLD_EXACT = cfg.address_threshold_exact
+        self.MAX_ADDRESS_LENGTH = cfg.max_address_length
+        self.MAX_TYPO_CORRECTIONS = cfg.max_typo_corrections
 
     def validate(
         self,
@@ -328,114 +381,191 @@ class AddressValidatorEngine:
         """
         context = context or {}
 
-        # Step 1: Pre-process and correct obvious typos
-        corrected_input, typo_corrections = self._correct_typos(raw_address)
-
-        # Step 2: Parse the address
-        parsed = AddressNormalizer.normalize(corrected_input)
-
-        # Step 3: Apply context hints
-        parsed = self._apply_context(parsed, context)
-
-        # Step 4: Complete missing components if possible
-        completed, completions = self._complete_address(parsed, mode)
-
-        # Step 5: Validate each component
-        component_scores = self._score_components(parsed, completed)
-
-        # Step 6: Identify issues
-        issues = self._identify_issues(completed, component_scores)
-
-        # Step 7: Calculate overall confidence
-        overall_confidence = self._calculate_confidence(component_scores, completed)
-
-        # Step 8: Determine quality and status
-        quality = self._determine_quality(overall_confidence, issues)
-        status = self._determine_status(overall_confidence, typo_corrections, completions)
-
-        # Step 9: Check validity and deliverability
-        is_valid = overall_confidence >= self.THRESHOLD_VALID and not any(
-            i.severity == "error" for i in issues
+        # Step 0: Sanitize input
+        sanitized_address = sanitize_address_input(
+            raw_address, max_length=self.MAX_ADDRESS_LENGTH
         )
-        is_deliverable = overall_confidence >= self.THRESHOLD_DELIVERABLE and is_valid
 
-        # Step 10: Generate standardized format
-        standardized = self._standardize_address(completed) if is_valid else None
+        # Handle empty input
+        if not sanitized_address:
+            return self._create_invalid_result(
+                raw_address or "",
+                "Empty or invalid address input"
+            )
 
-        # Step 11: Find alternatives if needed
-        alternatives = []
-        if not is_valid and self.index:
-            alternatives = self._find_alternatives(parsed)
+        try:
+            # Step 1: Pre-process and correct obvious typos
+            corrected_input, typo_corrections = self._correct_typos(sanitized_address)
 
-        # Step 12: Handle Puerto Rico specifics
-        is_pr = completed.is_puerto_rico
-        urb_status = None
-        if is_pr:
-            if completed.urbanization:
-                urb_status = "present"
-            elif self._could_infer_urbanization(completed):
-                urb_status = "inferred"
-            else:
-                urb_status = "missing"
+            # Step 2: Parse the address
+            parsed = AddressNormalizer.normalize(corrected_input)
 
-        # Combine corrections
-        all_corrections = typo_corrections + [
-            cs.correction_reason
-            for cs in component_scores
-            if cs.was_corrected and cs.correction_reason
-        ]
+            # Step 3: Apply context hints
+            parsed = self._apply_context(parsed, context)
 
+            # Step 4: Complete missing components if possible
+            completed, completions = self._complete_address(parsed, mode)
+
+            # Step 5: Validate each component
+            component_scores = self._score_components(parsed, completed)
+
+            # Step 6: Identify issues
+            issues = self._identify_issues(completed, component_scores)
+
+            # Step 7: Calculate overall confidence
+            overall_confidence = self._calculate_confidence(component_scores, completed)
+
+            # Step 8: Determine quality and status
+            quality = self._determine_quality(overall_confidence, issues)
+            status = self._determine_status(overall_confidence, typo_corrections, completions)
+
+            # Step 9: Check validity and deliverability
+            is_valid = overall_confidence >= self.THRESHOLD_VALID and not any(
+                i.severity == "error" for i in issues
+            )
+            is_deliverable = overall_confidence >= self.THRESHOLD_DELIVERABLE and is_valid
+
+            # Step 10: Generate standardized format
+            standardized = None
+            if is_valid:
+                try:
+                    standardized = self._standardize_address(completed)
+                except Exception as e:
+                    logger.warning(f"Failed to standardize address: {e}")
+
+            # Step 11: Find alternatives if needed
+            alternatives = []
+            if not is_valid and self.index:
+                try:
+                    alternatives = self._find_alternatives(parsed)
+                except Exception as e:
+                    logger.warning(f"Failed to find alternatives: {e}")
+
+            # Step 12: Handle Puerto Rico specifics
+            is_pr = completed.is_puerto_rico
+            urb_status = None
+            if is_pr:
+                if completed.urbanization:
+                    urb_status = "present"
+                elif self._could_infer_urbanization(completed):
+                    urb_status = "inferred"
+                else:
+                    urb_status = "missing"
+
+            # Combine corrections
+            all_corrections = typo_corrections + [
+                cs.correction_reason
+                for cs in component_scores
+                if cs.was_corrected and cs.correction_reason
+            ]
+
+            return ValidationResult(
+                is_valid=is_valid,
+                is_deliverable=is_deliverable,
+                overall_confidence=overall_confidence,
+                quality=quality,
+                status=status,
+                original=parsed,
+                validated=completed if is_valid else None,
+                standardized=standardized,
+                component_scores=component_scores,
+                issues=issues,
+                corrections_applied=all_corrections,
+                completions_applied=completions,
+                alternatives=alternatives,
+                is_puerto_rico=is_pr,
+                urbanization_status=urb_status,
+                metadata={
+                    "mode": mode.value,
+                    "context_applied": bool(context),
+                    "input_sanitized": raw_address != sanitized_address,
+                },
+            )
+        except Exception as e:
+            logger.error(f"Validation error for address '{raw_address[:50]}...': {e}")
+            return self._create_invalid_result(raw_address, f"Validation error: {str(e)}")
+
+    def _create_invalid_result(
+        self,
+        raw_address: str,
+        error_message: str,
+    ) -> ValidationResult:
+        """Create an invalid result for error cases."""
+        parsed = ParsedAddress(raw=raw_address)
         return ValidationResult(
-            is_valid=is_valid,
-            is_deliverable=is_deliverable,
-            overall_confidence=overall_confidence,
-            quality=quality,
-            status=status,
+            is_valid=False,
+            is_deliverable=False,
+            overall_confidence=0.0,
+            quality=AddressQuality.INVALID,
+            status=VerificationStatus.FAILED,
             original=parsed,
-            validated=completed if is_valid else None,
-            standardized=standardized,
-            component_scores=component_scores,
-            issues=issues,
-            corrections_applied=all_corrections,
-            completions_applied=completions,
-            alternatives=alternatives,
-            is_puerto_rico=is_pr,
-            urbanization_status=urb_status,
-            metadata={
-                "mode": mode.value,
-                "context_applied": bool(context),
-            },
+            validated=None,
+            standardized=None,
+            component_scores=[],
+            issues=[ValidationIssue(
+                severity="error",
+                component=None,
+                message=error_message,
+                auto_fixable=False,
+            )],
+            corrections_applied=[],
+            completions_applied=[],
+            alternatives=[],
+            is_puerto_rico=False,
+            urbanization_status=None,
+            metadata={"error": error_message},
         )
 
     def _correct_typos(self, raw: str) -> tuple[str, list[str]]:
         """Correct common typos in address.
+
+        Includes English and Spanish typo corrections.
+        Respects MAX_TYPO_CORRECTIONS limit to prevent runaway processing.
 
         Returns:
             Tuple of (corrected string, list of corrections made).
         """
         corrections = []
         result = raw
+        correction_count = 0
 
         # Lowercase for matching
         lower = raw.lower()
 
-        # Check for street type typos
+        # Check for English street type typos
         for typo, correct in COMMON_TYPOS.items():
+            if correction_count >= self.MAX_TYPO_CORRECTIONS:
+                break
             pattern = r"\b" + re.escape(typo) + r"\b"
             if re.search(pattern, lower, re.IGNORECASE):
                 result = re.sub(pattern, correct, result, flags=re.IGNORECASE)
                 corrections.append(f"Corrected '{typo}' to '{correct}'")
                 lower = result.lower()
+                correction_count += 1
+
+        # Check for Spanish typos (common in PR addresses)
+        for typo, correct in SPANISH_TYPOS.items():
+            if correction_count >= self.MAX_TYPO_CORRECTIONS:
+                break
+            pattern = r"\b" + re.escape(typo) + r"\b"
+            if re.search(pattern, lower, re.IGNORECASE):
+                result = re.sub(pattern, correct, result, flags=re.IGNORECASE)
+                corrections.append(f"Corrected Spanish '{typo}' to '{correct}'")
+                lower = result.lower()
+                correction_count += 1
 
         # Check for state name typos
         for typo, correct in STATE_TYPOS.items():
+            if correction_count >= self.MAX_TYPO_CORRECTIONS:
+                break
             if typo in lower:
                 result = result.replace(typo, correct)
                 result = result.replace(typo.title(), correct.title())
                 corrections.append(f"Corrected state '{typo}' to '{correct}'")
                 lower = result.lower()
+                correction_count += 1
 
-        # Fix common formatting issues
+        # Fix common formatting issues (don't count as typo corrections)
         # Double spaces
         if "  " in result:
             result = re.sub(r"\s+", " ", result)
@@ -528,30 +658,33 @@ class AddressValidatorEngine:
 
         # Try to complete from index if available
         if self.index and completed.street_name and completed.zip_code:
-            matches = self.index.lookup_street_in_zip(
-                completed.street_name,
-                completed.zip_code,
-                threshold=0.7,
-            )
-            if matches:
-                best = matches[0]
+            try:
+                matches = self.index.lookup_street_in_zip(
+                    completed.street_name,
+                    completed.zip_code,
+                    threshold=0.7,
+                )
+                if matches:
+                    best = matches[0]
 
-                # Complete street type if missing
-                if not completed.street_type and best.address.parsed.street_type:
-                    completed.street_type = best.address.parsed.street_type
-                    completions.append(
-                        f"Completed street type to '{completed.street_type}'"
-                    )
-
-                # Complete street name if partial match
-                if best.address.parsed.street_name:
-                    orig_name = completed.street_name.lower()
-                    match_name = best.address.parsed.street_name.lower()
-                    if orig_name != match_name and match_name.startswith(orig_name):
-                        completed.street_name = best.address.parsed.street_name
+                    # Complete street type if missing
+                    if not completed.street_type and best.address.parsed.street_type:
+                        completed.street_type = best.address.parsed.street_type
                         completions.append(
-                            f"Completed street name to '{completed.street_name}'"
+                            f"Completed street type to '{completed.street_type}'"
                         )
+
+                    # Complete street name if partial match
+                    if best.address.parsed.street_name:
+                        orig_name = completed.street_name.lower()
+                        match_name = best.address.parsed.street_name.lower()
+                        if orig_name != match_name and match_name.startswith(orig_name):
+                            completed.street_name = best.address.parsed.street_name
+                            completions.append(
+                                f"Completed street name to '{completed.street_name}'"
+                            )
+            except Exception as e:
+                logger.warning(f"Index lookup failed during completion: {e}")
 
         # Detect and set Puerto Rico flag
         if completed.zip_code and is_puerto_rico_zip(completed.zip_code):
