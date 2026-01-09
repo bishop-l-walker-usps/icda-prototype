@@ -82,12 +82,12 @@ class RedisStackClient:
         self._connected = False
         self._modules_detected = {}
 
-    async def connect(self, url: str, timeout: float = 10.0) -> dict[str, bool]:
+    async def connect(self, url: str, timeout: float = 3.0) -> dict[str, bool]:
         """Connect to Redis and detect available modules.
 
         Args:
             url: Redis connection URL (redis://localhost:6379)
-            timeout: Connection timeout in seconds
+            timeout: Connection timeout in seconds (default 3s for fast startup)
 
         Returns:
             Dict of module availability: {'search': True, 'json': False, ...}
@@ -104,8 +104,8 @@ class RedisStackClient:
             self.redis = aioredis.from_url(
                 url,
                 decode_responses=True,
-                socket_timeout=5.0,
-                socket_connect_timeout=5.0,
+                socket_timeout=2.0,
+                socket_connect_timeout=2.0,
                 health_check_interval=30,
             )
 
@@ -114,11 +114,11 @@ class RedisStackClient:
             self._connected = True
             logger.info(f"RedisStack: Connected to {url}")
 
-            # Detect modules
-            await self._detect_modules(timeout)
+            # Detect modules (quick)
+            await self._detect_modules(timeout=2.0)
 
-            # Initialize available module wrappers
-            await self._init_modules()
+            # Initialize available module wrappers (with individual timeouts)
+            await self._init_modules(timeout=2.0)
 
             return self._get_module_status()
 
@@ -162,8 +162,8 @@ class RedisStackClient:
         except Exception as e:
             logger.warning(f"RedisStack: Module detection failed - {e}")
 
-    async def _init_modules(self) -> None:
-        """Initialize available module wrappers."""
+    async def _init_modules(self, timeout: float = 3.0) -> None:
+        """Initialize available module wrappers with timeout protection."""
         # Always initialize pub/sub and streams (core Redis features)
         if self._connected:
             try:
@@ -176,8 +176,12 @@ class RedisStackClient:
             try:
                 from .redis_streams import RedisStreamsManager
                 self.streams = RedisStreamsManager(self.redis)
-                await self.streams.ensure_streams()
-                logger.info("RedisStack: Streams manager initialized")
+                try:
+                    await asyncio.wait_for(self.streams.ensure_streams(), timeout=timeout)
+                    logger.info("RedisStack: Streams manager initialized")
+                except asyncio.TimeoutError:
+                    logger.warning("RedisStack: Streams setup timed out, skipping")
+                    self.streams = None
             except ImportError:
                 pass
 
@@ -202,8 +206,13 @@ class RedisStackClient:
             try:
                 from .redis_timeseries import RedisTimeSeriesWrapper
                 self.timeseries = RedisTimeSeriesWrapper(self.redis)
-                await self.timeseries.ensure_timeseries()
-                logger.info("RedisStack: RedisTimeSeries wrapper initialized")
+                try:
+                    await asyncio.wait_for(self.timeseries.ensure_timeseries(), timeout=timeout)
+                    logger.info("RedisStack: RedisTimeSeries wrapper initialized")
+                except asyncio.TimeoutError:
+                    logger.warning("RedisStack: TimeSeries setup timed out, skipping")
+                    self.timeseries_available = False
+                    self.timeseries = None
             except ImportError:
                 pass
 
@@ -211,8 +220,13 @@ class RedisStackClient:
             try:
                 from .redis_bloom import RedisBloomWrapper
                 self.bloom = RedisBloomWrapper(self.redis)
-                await self.bloom.ensure_filters()
-                logger.info("RedisStack: RedisBloom wrapper initialized")
+                try:
+                    await asyncio.wait_for(self.bloom.ensure_filters(), timeout=timeout)
+                    logger.info("RedisStack: RedisBloom wrapper initialized")
+                except asyncio.TimeoutError:
+                    logger.warning("RedisStack: Bloom setup timed out, skipping")
+                    self.bloom_available = False
+                    self.bloom = None
             except ImportError:
                 pass
 
