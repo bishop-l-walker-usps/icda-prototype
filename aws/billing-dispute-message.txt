@@ -1,0 +1,45 @@
+SUBJECT: Request for Courtesy Credit - Unexpected CloudWatch Logs Charges (~$3,500)
+
+---
+
+Hello AWS Billing Team,
+
+I am writing to request a courtesy credit for unexpected Amazon CloudWatch Logs charges on my account (498251986918).
+
+SITUATION:
+I deployed two ECS Fargate services (ebl-backend-service and ebl-frontend-service) and was unaware that Fargate automatically configures the "awslogs" log driver by default. I did not intentionally enable CloudWatch logging and had no idea that all container stdout was being shipped to CloudWatch Logs.
+
+Over time, this resulted in approximately 2TB of logs being stored in CloudWatch, generating significant and unexpected charges (~$3,500).
+
+ACTIONS TAKEN TO RESOLVE:
+I have now:
+1. Created new task definitions WITHOUT CloudWatch logging:
+   - ebl-backend:7 (no logConfiguration)
+   - ebl-frontend:6 (no logConfiguration)
+2. Updated both ECS services to use these new task definitions
+3. Deleted both CloudWatch log groups:
+   - /ecs/ebl-backend (1.95 TB)
+   - /ecs/ebl-frontend (86 MB)
+
+This issue will not recur.
+
+REQUEST:
+As a small developer/business, this unexpected $3,500 charge for logs I never knowingly configured is a significant hardship. I respectfully request a one-time courtesy credit or adjustment for these CloudWatch Logs charges.
+
+I understand AWS provides powerful services, and I take responsibility for monitoring my usage going forward. However, the default behavior of Fargate automatically enabling CloudWatch logging without explicit opt-in or clear warnings during setup contributed to this situation.
+
+I would greatly appreciate any consideration you can provide.
+
+Thank you for your time and assistance.
+
+Best regards,
+[Your Name]
+Account ID: 498251986918
+Region: us-east-1
+
+---
+
+ATTACHMENTS TO INCLUDE (optional but helps):
+- Screenshot of current task definitions showing no logConfiguration
+- Screenshot showing log groups are deleted
+- Screenshot of the bill showing CloudWatch charges

@@ -1,0 +1,42 @@
+{
+  "family": "ebl-backend",
+  "taskRoleArn": "arn:aws:iam::498251986918:role/ecsTaskRole",
+  "executionRoleArn": "arn:aws:iam::498251986918:role/ecsTaskExecutionRole",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "containerDefinitions": [
+    {
+      "name": "ebl-backend",
+      "image": "498251986918.dkr.ecr.us-east-1.amazonaws.com/ebl-backend-production:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {"name": "ALLOWED_ORIGINS", "value": "https://ebl.yourdomain.com,http://localhost:5173"},
+        {"name": "JWT_SECRET", "value": "ebl-jwt-secret-change-for-production"},
+        {"name": "WS_CONNECTION_TIMEOUT", "value": "60"},
+        {"name": "SECRET_KEY", "value": "ebl-secret-key-change-for-production"},
+        {"name": "MAX_FREQUENCY", "value": "199"},
+        {"name": "PYTHON_ENV", "value": "production"},
+        {"name": "SAMPLE_RATE", "value": "48000"},
+        {"name": "AUDIO_FRAME_RATE", "value": "60"},
+        {"name": "BUFFER_SIZE", "value": "800"},
+        {"name": "WS_HEARTBEAT_INTERVAL", "value": "30"}
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"],
+        "interval": 30,
+        "timeout": 10,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}

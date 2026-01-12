@@ -1,0 +1,8 @@
+# Additional dependencies for upload module
+# Add these to existing requirements.txt
+
+# Async file operations (for streaming uploads)
+aiofiles>=23.0.0
+
+# Better PDF parsing (optional - falls back to pypdf)
+pdfplumber>=0.10.0

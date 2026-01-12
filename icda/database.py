@@ -1,0 +1,800 @@
+import json
+import re
+from pathlib import Path
+from bisect import bisect_left
+
+
+class CustomerDB:
+    __slots__ = ("customers", "by_crid", "by_state", "address_index", "name_index", "city_index", "available_states")
+
+    STATE_NAMES = {"NV": "nevada", "CA": "california", "TX": "texas", "AZ": "arizona", "FL": "florida",
+                   "NY": "new york", "WA": "washington", "CO": "colorado", "VA": "virginia",
+                   "GA": "georgia", "NC": "north carolina", "IL": "illinois", "PA": "pennsylvania",
+                   "OH": "ohio", "MI": "michigan"}
+
+    # Full state name to code mapping for parsing user queries
+    STATE_NAME_TO_CODE = {
+        "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+        "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+        "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+        "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+        "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+        "massachusetts": "MA", "michigan": "MI", "minnesota": "MN", "mississippi": "MS",
+        "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+        "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
+        "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+        "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI",
+        "south carolina": "SC", "south dakota": "SD", "tennessee": "TN", "texas": "TX",
+        "utah": "UT", "vermont": "VT", "virginia": "VA", "washington": "WA",
+        "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    }
+
+    # Reverse mapping: code to full name
+    STATE_CODE_TO_NAME = {v: k.title() for k, v in STATE_NAME_TO_CODE.items()}
+
+    def __init__(self, data_file: Path):
+        self.customers = self._load(data_file)
+        self.by_crid = {c["crid"]: c for c in self.customers}
+        self.by_state: dict[str, list] = {}
+        for c in self.customers:
+            self.by_state.setdefault(c["state"], []).append(c)
+        # Track which states actually have data
+        self.available_states = set(self.by_state.keys())
+        print(f"Available states in dataset: {sorted(self.available_states)}")
+        # Build autocomplete indexes
+        self._build_autocomplete_indexes()
+
+    def _load(self, path: Path) -> list[dict]:
+        if path.exists():
+            data = json.loads(path.read_text())
+            print(f"Loaded {len(data)} customers")
+            return data
+        print(f"{path} not found")
+        return []
+
+    def _build_autocomplete_indexes(self):
+        """Build sorted indexes for fast prefix-based autocomplete"""
+        # Address index: (lowercase_address, customer)
+        self.address_index = sorted(
+            [(c["address"].lower(), c) for c in self.customers],
+            key=lambda x: x[0]
+        )
+        # Name index: (lowercase_name, customer)
+        self.name_index = sorted(
+            [(c["name"].lower(), c) for c in self.customers],
+            key=lambda x: x[0]
+        )
+        # City index: (lowercase_city, customer)
+        self.city_index = sorted(
+            [(c["city"].lower(), c) for c in self.customers],
+            key=lambda x: x[0]
+        )
+        print(f"Built autocomplete indexes for {len(self.customers)} customers")
+
+    def has_state(self, state_code: str) -> bool:
+        """Check if a state exists in the dataset."""
+        return state_code.upper() in self.available_states
+
+    def get_available_states(self) -> list[str]:
+        """Get list of states with data, sorted by customer count descending."""
+        return sorted(self.available_states, key=lambda s: len(self.by_state.get(s, [])), reverse=True)
+
+    def get_state_counts(self) -> dict[str, int]:
+        """Get customer count per state."""
+        return {s: len(customers) for s, customers in self.by_state.items()}
+
+    def parse_state_from_query(self, query: str) -> tuple[str | None, str | None]:
+        """Parse state from query, return (state_code, state_name) or (None, None).
+        
+        Also detects if user asked for a state not in the dataset.
+        """
+        q = query.lower()
+        
+        # Check for full state names first
+        for name, code in self.STATE_NAME_TO_CODE.items():
+            if name in q:
+                return (code, name.title())
+        
+        # Check for state codes
+        state_match = re.search(r'\b([A-Z]{2})\b', query.upper())
+        if state_match:
+            code = state_match.group(1)
+            name = self.STATE_CODE_TO_NAME.get(code)
+            if name:
+                return (code, name)
+        
+        return (None, None)
+
+    def autocomplete(self, field: str, prefix: str, limit: int = 10) -> dict:
+        """
+        Fast prefix-based autocomplete using binary search.
+        field: 'address', 'name', or 'city'
+        prefix: the text to match
+        limit: max results to return
+        """
+        prefix_lower = prefix.lower().strip()
+        if not prefix_lower:
+            return {"success": False, "error": "Empty prefix"}
+
+        # Select the appropriate index
+        index = {
+            "address": self.address_index,
+            "name": self.name_index,
+            "city": self.city_index
+        }.get(field)
+
+        if not index:
+            return {"success": False, "error": f"Unknown field: {field}. Use 'address', 'name', or 'city'"}
+
+        # Binary search for the start position
+        pos = bisect_left(index, (prefix_lower,))
+
+        # Collect matches
+        results = []
+        seen_values = set()  # For deduplication (e.g., same city name)
+
+        while pos < len(index) and len(results) < limit:
+            value, customer = index[pos]
+            if not value.startswith(prefix_lower):
+                break
+
+            # For city autocomplete, deduplicate
+            if field == "city":
+                city_key = customer["city"].lower()
+                if city_key not in seen_values:
+                    seen_values.add(city_key)
+                    results.append({
+                        "value": customer["city"],
+                        "state": customer["state"],
+                        "count": sum(1 for c in self.customers if c["city"].lower() == city_key)
+                    })
+            else:
+                results.append({
+                    "crid": customer["crid"],
+                    "value": customer[field],
+                    "name": customer["name"],
+                    "city": customer["city"],
+                    "state": customer["state"]
+                })
+            pos += 1
+
+        return {"success": True, "field": field, "prefix": prefix, "count": len(results), "data": results}
+
+    def autocomplete_fuzzy(self, field: str, query: str, limit: int = 10) -> dict:
+        """
+        Fuzzy autocomplete - STRICT mode for direct name searches.
+        Only matches names that contain or start with the query.
+        Use search_similar_names() for phonetic/Levenshtein similarity.
+        """
+        query_lower = query.lower().strip()
+        if len(query_lower) < 2:
+            return {"success": False, "error": "Query too short (min 2 chars)"}
+
+        # Select field to search
+        if field not in ("address", "name", "city"):
+            return {"success": False, "error": f"Unknown field: {field}"}
+
+        # Score each customer by similarity - STRICT matching only
+        def similarity(text: str) -> float:
+            text_lower = text.lower()
+            # Exact prefix match = highest score
+            if text_lower.startswith(query_lower):
+                return 1.0 + len(query_lower) / len(text_lower)
+            # Contains match
+            if query_lower in text_lower:
+                return 0.8
+            # Word starts with query (e.g., "Chris" matches "John Chris Smith")
+            words = text_lower.split()
+            if any(w.startswith(query_lower) for w in words):
+                return 0.7
+            # NO character overlap matching - causes garbage results
+            # "Chris" should NOT match "Charles" just because they share letters
+            return 0
+
+        scored = []
+        seen = set()
+        for c in self.customers:
+            value = c[field]
+            score = similarity(value)
+            if score > 0.65 and value.lower() not in seen:
+                seen.add(value.lower())
+                scored.append((score, c))
+
+        # Sort by score descending, take top results
+        scored.sort(key=lambda x: -x[0])
+        results = [
+            {"crid": c["crid"], "value": c[field], "name": c["name"],
+             "city": c["city"], "state": c["state"], "score": round(s, 2)}
+            for s, c in scored[:limit]
+        ]
+
+        return {"success": True, "field": field, "query": query, "count": len(results), "data": results}
+
+    def search_similar_names(self, name: str, limit: int = 10, state: str = None) -> dict:
+        """
+        Find names SIMILAR to the query using Levenshtein distance.
+        Use this for "find names similar to Chris" → returns Chris, Charles, Christian, etc.
+        
+        Args:
+            name: Name to find similar matches for
+            limit: Maximum results to return
+            state: Optional state filter
+        """
+        query_lower = name.lower().strip()
+        if len(query_lower) < 2:
+            return {"success": False, "error": "Query too short (min 2 chars)"}
+
+        def levenshtein_distance(s1: str, s2: str) -> int:
+            """Calculate Levenshtein edit distance between two strings."""
+            if len(s1) < len(s2):
+                s1, s2 = s2, s1
+            if len(s2) == 0:
+                return len(s1)
+            
+            prev_row = range(len(s2) + 1)
+            for i, c1 in enumerate(s1):
+                curr_row = [i + 1]
+                for j, c2 in enumerate(s2):
+                    # Cost is 0 if characters match, 1 otherwise
+                    insertions = prev_row[j + 1] + 1
+                    deletions = curr_row[j] + 1
+                    substitutions = prev_row[j] + (c1 != c2)
+                    curr_row.append(min(insertions, deletions, substitutions))
+                prev_row = curr_row
+            return prev_row[-1]
+
+        def name_similarity(full_name: str) -> float:
+            """Score similarity based on Levenshtein distance of first name."""
+            full_lower = full_name.lower()
+            # Extract first name (first word)
+            first_name = full_lower.split()[0] if full_lower.split() else full_lower
+            
+            # Exact match = perfect score
+            if first_name == query_lower:
+                return 1.0
+            
+            # Starts with query = very high score
+            if first_name.startswith(query_lower):
+                return 0.95
+            
+            # Query starts with first name (e.g., "Christopher" when searching "Chris")
+            if query_lower.startswith(first_name):
+                return 0.9
+            
+            # Levenshtein distance - normalize by max length
+            distance = levenshtein_distance(first_name, query_lower)
+            max_len = max(len(first_name), len(query_lower))
+            similarity = 1.0 - (distance / max_len)
+            
+            # Also check if they share the same starting letters (phonetic similarity)
+            shared_prefix = 0
+            for a, b in zip(first_name, query_lower):
+                if a == b:
+                    shared_prefix += 1
+                else:
+                    break
+            prefix_bonus = shared_prefix / max_len * 0.2
+            
+            return min(similarity + prefix_bonus, 0.89)  # Cap below exact matches
+
+        # Filter by state first if provided
+        candidates = self.customers
+        if state:
+            state_upper = state.upper()
+            if state_upper in self.available_states:
+                candidates = self.by_state.get(state_upper, [])
+            else:
+                return {"success": True, "total": 0, "data": [], "reason": f"No data for {state_upper}"}
+
+        # Score all candidates
+        scored = []
+        seen_names = set()
+        for c in candidates:
+            name_val = c["name"]
+            name_key = name_val.lower()
+            if name_key in seen_names:
+                continue
+            
+            score = name_similarity(name_val)
+            if score >= 0.5:  # Lower threshold for similarity search
+                seen_names.add(name_key)
+                scored.append((score, c))
+
+        # Sort by score descending
+        scored.sort(key=lambda x: -x[0])
+        
+        results = [
+            {
+                "crid": c["crid"],
+                "name": c["name"],
+                "city": c["city"],
+                "state": c["state"],
+                "similarity_score": round(s, 3),
+                "match_type": "exact" if s >= 0.95 else "similar"
+            }
+            for s, c in scored[:limit]
+        ]
+
+        return {
+            "success": True,
+            "query": name,
+            "search_type": "similar_names",
+            "total": len(results),
+            "data": results
+        }
+
+    def lookup(self, crid: str) -> dict:
+        crid = crid.upper()
+        if crid.startswith("CRID-"):
+            num = crid.removeprefix("CRID-")
+            for fmt in (f"CRID-{num.zfill(6)}", f"CRID-{num.zfill(3)}", crid):
+                if data := self.by_crid.get(fmt):
+                    return {"success": True, "data": data}
+        return {"success": False, "error": f"CRID {crid} not found"}
+
+    def search(self, state: str = None, city: str = None, min_moves: int = None,
+               customer_type: str = None, has_apartment: bool = None,
+               status: str = None, limit: int = None) -> dict:
+        """Search customers with filters. Returns error if requested state not in dataset.
+
+        Args:
+            state: Two-letter state code (e.g., "TX", "CA")
+            city: City name (partial match)
+            min_moves: Minimum number of moves
+            customer_type: RESIDENTIAL, BUSINESS, or PO_BOX
+            has_apartment: True to filter for apartment/unit addresses
+            status: ACTIVE, INACTIVE, or PENDING
+            limit: Maximum number of results to return
+        """
+
+        # Check if requested state exists in dataset
+        if state:
+            state_upper = state.upper()
+            if state_upper not in self.available_states:
+                # State was requested but doesn't exist in our data
+                available = self.get_available_states()
+                state_name = self.STATE_CODE_TO_NAME.get(state_upper, state_upper)
+                return {
+                    "success": False,
+                    "error": "state_not_available",
+                    "message": f"No customer data available for {state_name} ({state_upper}).",
+                    "requested_state": state_upper,
+                    "requested_state_name": state_name,
+                    "available_states": available,
+                    "available_states_with_counts": {s: len(self.by_state[s]) for s in available},
+                    "suggestion": f"Try one of our available states: {', '.join(available[:5])}...",
+                }
+            results = self.by_state.get(state_upper, [])
+        else:
+            results = self.customers
+
+        # Filter by status (ACTIVE, INACTIVE, PENDING)
+        if status:
+            status_upper = status.upper()
+            results = [c for c in results if c.get("status", "").upper() == status_upper]
+
+        if min_moves:
+            results = [c for c in results if c["move_count"] >= min_moves]
+        if city:
+            city_lower = city.casefold()
+            results = [c for c in results if city_lower in c["city"].casefold()]
+        if customer_type:
+            ct_upper = customer_type.upper()
+            results = [c for c in results if c.get("customer_type", "").upper() == ct_upper]
+        if has_apartment:
+            # Filter for addresses containing "Apt" or "Unit" (apartment/unit renters)
+            results = [c for c in results if "apt" in c.get("address", "").lower() or "unit" in c.get("address", "").lower()]
+        data = results[:limit] if limit else results
+        return {"success": True, "total": len(results), "data": data}
+
+    def stats(self) -> dict:
+        return {"success": True, "data": {s: len(c) for s, c in self.by_state.items()}, "total": len(self.customers)}
+
+    # =========================================================================
+    # NEW TOOLS - Enhanced Query Capabilities
+    # =========================================================================
+
+    def search_by_move_history(self, from_state: str = None, to_state: str = None,
+                                status: str = None, limit: int = None) -> dict:
+        """THE CRITICAL MISSING METHOD - Find customers who moved from one state to another.
+
+        This enables queries like "show me Texas customers who moved from California".
+
+        Args:
+            from_state: State the customer moved FROM (checks move_history)
+            to_state: Current state (where they moved TO)
+            status: ACTIVE, INACTIVE, or PENDING
+            limit: Maximum number of results
+        """
+        # Start with all customers or filter by current state
+        if to_state:
+            to_state_upper = to_state.upper()
+            if to_state_upper not in self.available_states:
+                state_name = self.STATE_CODE_TO_NAME.get(to_state_upper, to_state_upper)
+                return {
+                    "success": False,
+                    "error": "state_not_available",
+                    "message": f"No customer data for {state_name} ({to_state_upper}).",
+                    "requested_state": to_state_upper,
+                }
+            results = self.by_state.get(to_state_upper, [])
+        else:
+            results = self.customers
+
+        # Filter by status
+        if status:
+            status_upper = status.upper()
+            results = [c for c in results if c.get("status", "").upper() == status_upper]
+
+        # Filter by origin state (moved FROM) - check move_history
+        if from_state:
+            from_state_upper = from_state.upper()
+            filtered = []
+            for c in results:
+                move_history = c.get("move_history", [])
+                # Check if any previous move was FROM the specified state
+                for move in move_history:
+                    # Move history shows where they moved TO, so previous state
+                    # would be inferred from the sequence or from "from_address"
+                    move_state = move.get("state", "")
+                    if move_state.upper() == from_state_upper:
+                        filtered.append(c)
+                        break
+            results = filtered
+
+        data = results[:limit] if limit else results
+        return {
+            "success": True,
+            "total": len(results),
+            "data": data,
+            "filters_applied": {
+                "from_state": from_state,
+                "to_state": to_state,
+                "status": status,
+            }
+        }
+
+    def get_move_timeline(self, crid: str) -> dict:
+        """Get complete move history timeline for a customer.
+
+        Args:
+            crid: Customer Record ID
+        """
+        result = self.lookup(crid)
+        if not result.get("success"):
+            return result
+
+        customer = result["data"]
+        move_history = customer.get("move_history", [])
+
+        return {
+            "success": True,
+            "crid": customer["crid"],
+            "name": customer["name"],
+            "current_address": {
+                "address": customer.get("address"),
+                "city": customer.get("city"),
+                "state": customer.get("state"),
+                "zip": customer.get("zip"),
+            },
+            "move_count": customer.get("move_count", 0),
+            "last_move": customer.get("last_move"),
+            "move_history": move_history,
+            "timeline": [
+                {
+                    "index": i + 1,
+                    "from_address": move.get("from_address"),
+                    "to_address": move.get("to_address"),
+                    "city": move.get("city"),
+                    "state": move.get("state"),
+                    "zip": move.get("zip"),
+                    "move_date": move.get("move_date"),
+                }
+                for i, move in enumerate(move_history)
+            ]
+        }
+
+    def group_by(self, field: str, state: str = None, status: str = None,
+                 customer_type: str = None) -> dict:
+        """Group and count customers by a specific field.
+
+        Args:
+            field: Field to group by (state, status, customer_type, move_count)
+            state: Optional state filter before grouping
+            status: Optional status filter before grouping
+            customer_type: Optional customer type filter before grouping
+        """
+        valid_fields = {"state", "status", "customer_type", "move_count", "city"}
+        if field not in valid_fields:
+            return {"success": False, "error": f"Invalid field. Use one of: {valid_fields}"}
+
+        # Apply filters first
+        results = self.customers
+        if state:
+            state_upper = state.upper()
+            results = [c for c in results if c.get("state", "").upper() == state_upper]
+        if status:
+            status_upper = status.upper()
+            results = [c for c in results if c.get("status", "").upper() == status_upper]
+        if customer_type:
+            ct_upper = customer_type.upper()
+            results = [c for c in results if c.get("customer_type", "").upper() == ct_upper]
+
+        # Group by field
+        groups: dict[str, int] = {}
+        for c in results:
+            value = c.get(field, "UNKNOWN")
+            if isinstance(value, int):
+                value = str(value)
+            groups[value] = groups.get(value, 0) + 1
+
+        # Sort by count descending
+        sorted_groups = sorted(groups.items(), key=lambda x: -x[1])
+
+        return {
+            "success": True,
+            "field": field,
+            "total_records": len(results),
+            "unique_values": len(groups),
+            "groups": [{"value": v, "count": c} for v, c in sorted_groups],
+            "filters_applied": {"state": state, "status": status, "customer_type": customer_type}
+        }
+
+    def count_by_criteria(self, state: str = None, city: str = None, status: str = None,
+                          customer_type: str = None, min_moves: int = None,
+                          from_state: str = None) -> dict:
+        """Fast count without returning full data - optimized for "how many" questions.
+
+        Args:
+            state: Current state filter
+            city: City filter (partial match)
+            status: ACTIVE, INACTIVE, or PENDING
+            customer_type: RESIDENTIAL, BUSINESS, or PO_BOX
+            min_moves: Minimum number of moves
+            from_state: State they moved FROM (checks move_history)
+        """
+        results = self.customers
+
+        if state:
+            state_upper = state.upper()
+            if state_upper not in self.available_states:
+                return {"success": True, "count": 0, "reason": f"No data for state {state_upper}"}
+            results = self.by_state.get(state_upper, [])
+
+        if status:
+            status_upper = status.upper()
+            results = [c for c in results if c.get("status", "").upper() == status_upper]
+
+        if city:
+            city_lower = city.casefold()
+            results = [c for c in results if city_lower in c.get("city", "").casefold()]
+
+        if customer_type:
+            ct_upper = customer_type.upper()
+            results = [c for c in results if c.get("customer_type", "").upper() == ct_upper]
+
+        if min_moves:
+            results = [c for c in results if c.get("move_count", 0) >= min_moves]
+
+        if from_state:
+            from_upper = from_state.upper()
+            results = [
+                c for c in results
+                if any(m.get("state", "").upper() == from_upper for m in c.get("move_history", []))
+            ]
+
+        return {
+            "success": True,
+            "count": len(results),
+            "filters_applied": {
+                "state": state, "city": city, "status": status,
+                "customer_type": customer_type, "min_moves": min_moves,
+                "from_state": from_state
+            }
+        }
+
+    def range_search(self, field: str, min_value=None, max_value=None,
+                     state: str = None, status: str = None, limit: int = None) -> dict:
+        """Filter customers by numeric or date range.
+
+        Args:
+            field: Field to filter (move_count, last_move, created_date)
+            min_value: Minimum value (inclusive)
+            max_value: Maximum value (inclusive)
+            state: Optional state filter
+            status: Optional status filter
+            limit: Maximum results
+        """
+        valid_fields = {"move_count", "last_move", "created_date"}
+        if field not in valid_fields:
+            return {"success": False, "error": f"Invalid field. Use one of: {valid_fields}"}
+
+        results = self.customers
+
+        if state:
+            state_upper = state.upper()
+            if state_upper in self.available_states:
+                results = self.by_state.get(state_upper, [])
+            else:
+                return {"success": True, "total": 0, "data": [], "reason": f"No data for {state_upper}"}
+
+        if status:
+            status_upper = status.upper()
+            results = [c for c in results if c.get("status", "").upper() == status_upper]
+
+        # Apply range filter
+        filtered = []
+        for c in results:
+            value = c.get(field)
+            if value is None:
+                continue
+
+            # Handle numeric vs string (date) comparison
+            if field == "move_count":
+                if min_value is not None and value < min_value:
+                    continue
+                if max_value is not None and value > max_value:
+                    continue
+            else:
+                # Date comparison (string ISO format works for comparison)
+                if min_value is not None and value < str(min_value):
+                    continue
+                if max_value is not None and value > str(max_value):
+                    continue
+            filtered.append(c)
+
+        data = filtered[:limit] if limit else filtered
+        return {
+            "success": True,
+            "total": len(filtered),
+            "data": data,
+            "field": field,
+            "range": {"min": min_value, "max": max_value}
+        }
+
+    def multi_search(self, criteria: list[dict], logic: str = "AND", limit: int = None) -> dict:
+        """Search with multiple criteria using AND/OR logic.
+
+        Args:
+            criteria: List of filter criteria, each with {field, operator, value}
+                      Operators: equals, contains, greater_than, less_than, in
+            logic: "AND" (all must match) or "OR" (any can match)
+            limit: Maximum results
+
+        Example:
+            criteria=[
+                {"field": "state", "operator": "in", "value": ["TX", "CA"]},
+                {"field": "status", "operator": "equals", "value": "INACTIVE"}
+            ]
+        """
+        if not criteria:
+            return {"success": False, "error": "No criteria provided"}
+
+        def matches_criterion(customer: dict, crit: dict) -> bool:
+            field = crit.get("field")
+            operator = crit.get("operator", "equals")
+            value = crit.get("value")
+
+            customer_value = customer.get(field)
+            if customer_value is None:
+                return False
+
+            # Normalize strings for comparison
+            if isinstance(customer_value, str):
+                customer_value = customer_value.upper()
+            if isinstance(value, str):
+                value = value.upper()
+            if isinstance(value, list):
+                value = [v.upper() if isinstance(v, str) else v for v in value]
+
+            match operator:
+                case "equals":
+                    return customer_value == value
+                case "contains":
+                    return value in str(customer_value)
+                case "greater_than":
+                    return customer_value > value
+                case "less_than":
+                    return customer_value < value
+                case "in":
+                    return customer_value in value
+                case "not_equals":
+                    return customer_value != value
+                case _:
+                    return False
+
+        results = []
+        for c in self.customers:
+            if logic.upper() == "AND":
+                if all(matches_criterion(c, crit) for crit in criteria):
+                    results.append(c)
+            else:  # OR
+                if any(matches_criterion(c, crit) for crit in criteria):
+                    results.append(c)
+
+        data = results[:limit] if limit else results
+        return {
+            "success": True,
+            "total": len(results),
+            "data": data,
+            "logic": logic,
+            "criteria_count": len(criteria)
+        }
+
+    def regex_search(self, field: str, pattern: str, state: str = None,
+                     status: str = None, limit: int = None) -> dict:
+        """Search using regex pattern matching.
+
+        Args:
+            field: Field to search (name, address, city)
+            pattern: Regex pattern to match
+            state: Optional state filter
+            status: Optional status filter
+            limit: Maximum results
+        """
+        valid_fields = {"name", "address", "city"}
+        if field not in valid_fields:
+            return {"success": False, "error": f"Invalid field. Use one of: {valid_fields}"}
+
+        try:
+            compiled = re.compile(pattern, re.IGNORECASE)
+        except re.error as e:
+            return {"success": False, "error": f"Invalid regex pattern: {e}"}
+
+        results = self.customers
+
+        if state:
+            state_upper = state.upper()
+            if state_upper in self.available_states:
+                results = self.by_state.get(state_upper, [])
+            else:
+                return {"success": True, "total": 0, "data": []}
+
+        if status:
+            status_upper = status.upper()
+            results = [c for c in results if c.get("status", "").upper() == status_upper]
+
+        matched = [c for c in results if compiled.search(c.get(field, ""))]
+        data = matched[:limit] if limit else matched
+
+        return {
+            "success": True,
+            "total": len(matched),
+            "data": data,
+            "field": field,
+            "pattern": pattern
+        }
+
+    def execute(self, tool: str, query: str) -> dict:
+        q = query.casefold()
+        match tool:
+            case "lookup_crid":
+                if m := re.search(r"crid[-:\s]*(\d+)", q):
+                    return self.lookup(f"CRID-{m.group(1)}")
+                return {"success": False, "error": "No CRID found in query"}
+            case "search_customers":
+                # Parse state from query - check if it exists
+                state_code, state_name = self.parse_state_from_query(query)
+                if state_code and state_code not in self.available_states:
+                    # User asked for a state we don't have
+                    available = self.get_available_states()
+                    return {
+                        "success": False,
+                        "error": "state_not_available",
+                        "message": f"No customer data available for {state_name} ({state_code}).",
+                        "requested_state": state_code,
+                        "requested_state_name": state_name,
+                        "available_states": available,
+                        "available_states_with_counts": {s: len(self.by_state[s]) for s in available},
+                        "suggestion": f"Try one of our available states: {', '.join(available[:5])}...",
+                    }
+                
+                # Original logic for states we do have
+                state = next((s for s in self.by_state if s.lower() in q or self.STATE_NAMES.get(s, "").lower() in q), None)
+                min_moves = int(m.group(1)) if (m := re.search(r"(\d+)\+?\s*(?:times|moves)", q)) else None
+                if "twice" in q: min_moves = 2
+                if "three" in q: min_moves = 3
+                return self.search(state=state, min_moves=min_moves)
+            case "get_stats":
+                return self.stats()
+        return {"success": False, "error": f"Unknown tool: {tool}"}

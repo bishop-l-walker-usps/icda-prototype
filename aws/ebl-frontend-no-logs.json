@@ -1,0 +1,35 @@
+{
+  "family": "ebl-frontend",
+  "taskRoleArn": "arn:aws:iam::498251986918:role/ecsTaskRole",
+  "executionRoleArn": "arn:aws:iam::498251986918:role/ecsTaskExecutionRole",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "containerDefinitions": [
+    {
+      "name": "ebl-frontend",
+      "image": "498251986918.dkr.ecr.us-east-1.amazonaws.com/ebl-frontend:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "hostPort": 80,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {"name": "PYTHON_ENV", "value": "production"},
+        {"name": "DEBUG", "value": "false"},
+        {"name": "BACKEND_URL", "value": "http://backend-alb-dns-here:8000"}
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost/ || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 10
+      }
+    }
+  ]
+}

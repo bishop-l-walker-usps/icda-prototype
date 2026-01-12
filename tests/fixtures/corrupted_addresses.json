@@ -1,0 +1,1402 @@
+[
+  {
+    "id": "TEST-001",
+    "original_crid": "CRID-011074",
+    "corrupted_address": "6307 Pine Way, White Plains, NY 1067",
+    "expected_address": "6307 Pine Way, White Plains, NY 10670",
+    "corruption_type": "partial_zip"
+  },
+  {
+    "id": "TEST-002",
+    "original_crid": "CRID-038046",
+    "corrupted_address": "835 Main",
+    "expected_address": "835 Main Way, Dallas, TX 75267",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-003",
+    "original_crid": "CRID-025546",
+    "corrupted_address": "3016   Forest   Rd  ,   Long   Beach  ,   CA  ,   90804",
+    "expected_address": "3016 Forest Rd, Long Beach, CA 90804",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-004",
+    "original_crid": "CRID-038953",
+    "corrupted_address": "9929   Adams   Dr   Apt   519  ,   Scranton  ,   PA  ,   18514",
+    "expected_address": "9929 Adams Dr Apt 519, Scranton, PA 18514",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-005",
+    "original_crid": "CRID-017096",
+    "corrupted_address": "9335 Dogwood Cir, Yonkers 10721",
+    "expected_address": "9335 Dogwood Cir, Yonkers, NY 10721",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-006",
+    "original_crid": "CRID-040817",
+    "corrupted_address": "2595   Lincoln   Ln  ,   Corpus   Christi  ,   TX  ,   78496",
+    "expected_address": "2595 Lincoln Ln, Corpus Christi, TX 78496",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-007",
+    "original_crid": "CRID-025299",
+    "corrupted_address": "6052 Jefferson St, Arvada, CO 80080",
+    "expected_address": "6052 Jefferson St, Arvada, CO 80080",
+    "corruption_type": "phonetic_misspelling"
+  },
+  {
+    "id": "TEST-008",
+    "original_crid": "CRID-005297",
+    "corrupted_address": "220 Aspen Ln, Irvine, CA",
+    "expected_address": "220 Aspen Ln, Irvine, CA 92697",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-009",
+    "original_crid": "CRID-043022",
+    "corrupted_address": "3471 epm Rd, Dallas, TX 75209",
+    "expected_address": "3471 Elm Rd, Dallas, TX 75209",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-010",
+    "original_crid": "CRID-012729",
+    "corrupted_address": "4391 redwlod Ave Apt 495, Columbus, GA 31948",
+    "expected_address": "4391 Redwood Ave Apt 495, Columbus, GA 31948",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-011",
+    "original_crid": "CRID-048573",
+    "corrupted_address": "2731 Grant Ave Apt 302, Hampton, VA",
+    "expected_address": "2731 Grant Ave Apt 302, Hampton, VA 23681",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-012",
+    "original_crid": "CRID-011392",
+    "corrupted_address": "4099 Cherry Blvd, PA 19112",
+    "expected_address": "4099 Cherry Blvd, Philadelphia, PA 19112",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-013",
+    "original_crid": "CRID-024564",
+    "corrupted_address": "3424 Asepn Ln, Fort Lauderdale, FL 33333",
+    "expected_address": "3424 Aspen Ln, Fort Lauderdale, FL 33333",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-014",
+    "original_crid": "CRID-043924",
+    "corrupted_address": "6359 Adams Pkwy, FL 32289",
+    "expected_address": "6359 Adams Pkwy, Jacksonville, FL 32289",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-015",
+    "original_crid": "CRID-034176",
+    "corrupted_address": "6915 Water Way, Hollywood, FL",
+    "expected_address": "6915 Water Way, Hollywood, FL 33068",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-016",
+    "original_crid": "CRID-048095",
+    "corrupted_address": "3064   Adams   Ter  ,   Charlotte  ,   NC  ,   28240",
+    "expected_address": "3064 Adams Ter, Charlotte, NC 28240",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-017",
+    "original_crid": "CRID-045503",
+    "corrupted_address": "5005 Sunset Cir Apt 329, Laredo 78090",
+    "expected_address": "5005 Sunset Cir Apt 329, Laredo, TX 78090",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-018",
+    "original_crid": "CRID-034569",
+    "corrupted_address": "1677 Pine",
+    "expected_address": "1677 Pine Rd Suite 229, Columbus, GA 31922",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-019",
+    "original_crid": "CRID-045626",
+    "corrupted_address": "4669 Highland Rd, Buffalo, NY 1426",
+    "expected_address": "4669 Highland Rd, Buffalo, NY 14268",
+    "corruption_type": "partial_zip"
+  },
+  {
+    "id": "TEST-020",
+    "original_crid": "CRID-019106",
+    "corrupted_address": "6450 Hill Ave, Las Vegas, NV",
+    "expected_address": "6450 Hill Ave, Las Vegas, NV 89102",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-021",
+    "original_crid": "CRID-027905",
+    "corrupted_address": "1382 FOREST LN APT 917, CHANDLER, AZ 85295",
+    "expected_address": "1382 Forest Ln Apt 917, Chandler, AZ 85295",
+    "corruption_type": "all_caps"
+  },
+  {
+    "id": "TEST-022",
+    "original_crid": "CRID-000283",
+    "corrupted_address": "8040 Hill Cir Apt 791, New Rochelle, NY",
+    "expected_address": "8040 Hill Cir Apt 791, New Rochelle, NY 10881",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-023",
+    "original_crid": "CRID-020805",
+    "corrupted_address": "8201 Monroe",
+    "expected_address": "8201 Monroe Ct Suite 468, Philadelphia, PA 19140",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-024",
+    "original_crid": "CRID-041581",
+    "corrupted_address": "6872   Pine   Pl  ,   Renton  ,   WA  ,   98047",
+    "expected_address": "6872 Pine Pl, Renton, WA 98047",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-025",
+    "original_crid": "CRID-041156",
+    "corrupted_address": "3385 Redwood Pkwy, Chandler, AZ 85218",
+    "expected_address": "3385 Redwood Pkwy, Chandler, AZ 85218",
+    "corruption_type": "phonetic_misspelling"
+  },
+  {
+    "id": "TEST-026",
+    "original_crid": "CRID-029648",
+    "corrupted_address": "8724   Jefferson   Ter  ,   Greensboro  ,   NC  ,   27487",
+    "expected_address": "8724 Jefferson Ter, Greensboro, NC 27487",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-027",
+    "original_crid": "CRID-009807",
+    "corrupted_address": "6375 Birch Ct, Lubbock, TX",
+    "expected_address": "6375 Birch Ct, Lubbock, TX 79416",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-028",
+    "original_crid": "CRID-023660",
+    "corrupted_address": "233 Cleveland Ave Apt 230, Chesapeake, VA",
+    "expected_address": "7733 Cleveland Ave Apt 230, Chesapeake, VA 23386",
+    "corruption_type": "swap_components"
+  },
+  {
+    "id": "TEST-029",
+    "original_crid": "CRID-026834",
+    "corrupted_address": "2350 Market Ave, FL 33331",
+    "expected_address": "2350 Market Ave, Fort Lauderdale, FL 33331",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-030",
+    "original_crid": "CRID-008451",
+    "corrupted_address": "9054 Valleey Ln, Savannah, GA 31414",
+    "expected_address": "9054 Valley Ln, Savannah, GA 31414",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-031",
+    "original_crid": "CRID-030477",
+    "corrupted_address": "2818 Pine Dr, Warren 48001",
+    "expected_address": "2818 Pine Dr, Warren, MI 48001",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-032",
+    "original_crid": "CRID-014586",
+    "corrupted_address": "5477 Valley Cir, Orlando, FL",
+    "expected_address": "5477 Valley Cir, Orlando, FL 32860",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-033",
+    "original_crid": "CRID-016520",
+    "corrupted_address": "1053 CCenter Ave Apt 271, Rochester, NY 14650",
+    "expected_address": "1053 Center Ave Apt 271, Rochester, NY 14650",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-034",
+    "original_crid": "CRID-006571",
+    "corrupted_address": "2288 Elm Rd, Erie, PA",
+    "expected_address": "2288 Elm Rd, Erie, PA 16510",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-035",
+    "original_crid": "CRID-022773",
+    "corrupted_address": "5670 Grant Ter Apt 259, Springfield, IL",
+    "expected_address": "5670 Grant Ter Apt 259, Springfield, IL 62715",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-036",
+    "original_crid": "CRID-015587",
+    "corrupted_address": "2703 Madison Pl Apt 585, Tempe 85247",
+    "expected_address": "2703 Madison Pl Apt 585, Tempe, AZ 85247",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-037",
+    "original_crid": "CRID-044151",
+    "corrupted_address": "9894 Willow Blvd Apt 986, Federal Way 98312",
+    "expected_address": "9894 Willow Blvd Apt 986, Federal Way, WA 98312",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-038",
+    "original_crid": "CRID-021279",
+    "corrupted_address": "3547 Mill Ter, GA 30643",
+    "expected_address": "3547 Mill Ter, Athens, GA 30643",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-039",
+    "original_crid": "CRID-026733",
+    "corrupted_address": "9927 Cyypress Cir, Joliet, IL 60455",
+    "expected_address": "9927 Cypress Cir, Joliet, IL 60455",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-040",
+    "original_crid": "CRID-010030",
+    "corrupted_address": "6834 Water Cir, Naperville, IL",
+    "expected_address": "6834 Water Cir, Naperville, IL 60515",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-041",
+    "original_crid": "CRID-001442",
+    "corrupted_address": "8321   Walnut   Pl  ,   Fayetteville  ,   NC  ,   28397",
+    "expected_address": "8321 Walnut Pl, Fayetteville, NC 28397",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-042",
+    "original_crid": "CRID-021492",
+    "corrupted_address": "2080 Adamss Ct, Jacksonville, FL 32292",
+    "expected_address": "2080 Adams Ct, Jacksonville, FL 32292",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-043",
+    "original_crid": "CRID-022759",
+    "corrupted_address": "753 Kennedy Dr Suite 892, Springfield 62792",
+    "expected_address": "753 Kennedy Dr Suite 892, Springfield, IL 62792",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-044",
+    "original_crid": "CRID-034929",
+    "corrupted_address": "9794   Jackson   Rd  ,   Columbus  ,   GA  ,   31920",
+    "expected_address": "9794 Jackson Rd, Columbus, GA 31920",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-045",
+    "original_crid": "CRID-021778",
+    "corrupted_address": "770 Spring Dr Apt 580, Houston, TX",
+    "expected_address": "2096 Spring Dr Apt 580, Houston, TX 77075",
+    "corruption_type": "swap_components"
+  },
+  {
+    "id": "TEST-046",
+    "original_crid": "CRID-040217",
+    "corrupted_address": "2250   Cleveland   Pkwy   Apt   1  ,   Irvine  ,   CA  ,   92675",
+    "expected_address": "2250 Cleveland Pkwy Apt 1, Irvine, CA 92675",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-047",
+    "original_crid": "CRID-043078",
+    "corrupted_address": "7832 Main",
+    "expected_address": "7832 Main Blvd Apt 68, Bakersfield, CA 93395",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-048",
+    "original_crid": "CRID-033892",
+    "corrupted_address": "3953 Cherry Way, Fayetteville, NC",
+    "expected_address": "3953 Cherry Way, Fayetteville, NC 28338",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-049",
+    "original_crid": "CRID-027891",
+    "corrupted_address": "1239 JEFFERSON CT, COLUMBUS, GA 31982",
+    "expected_address": "1239 Jefferson Ct, Columbus, GA 31982",
+    "corruption_type": "all_caps"
+  },
+  {
+    "id": "TEST-050",
+    "original_crid": "CRID-036588",
+    "corrupted_address": "2896 lincopn St, Chicago, IL 60610",
+    "expected_address": "2896 Lincoln St, Chicago, IL 60610",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-051",
+    "original_crid": "CRID-024989",
+    "corrupted_address": "3445 Birh Blvd, Fayetteville, NC 28347",
+    "expected_address": "3445 Birch Blvd, Fayetteville, NC 28347",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-052",
+    "original_crid": "CRID-017088",
+    "corrupted_address": "2529 hikory rd, Carson City, NV 89707",
+    "expected_address": "2529 Hickory Rd, Carson City, NV 89707",
+    "corruption_type": "phonetic_misspelling"
+  },
+  {
+    "id": "TEST-053",
+    "original_crid": "CRID-027189",
+    "corrupted_address": "923 Cedra Ave Apt 737, Greensboro, NC 27485",
+    "expected_address": "923 Cedar Ave Apt 737, Greensboro, NC 27485",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-054",
+    "original_crid": "CRID-025572",
+    "corrupted_address": "991 Mani Cir, North Las Vegas, NV 89084",
+    "expected_address": "991 Main Cir, North Las Vegas, NV 89084",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-055",
+    "original_crid": "CRID-015223",
+    "corrupted_address": "1862 Spruce Cir, Spring Valley, Nevada 89126",
+    "expected_address": "1862 Spruce Cir, Spring Valley, NV 89126",
+    "corruption_type": "state_full_name"
+  },
+  {
+    "id": "TEST-056",
+    "original_crid": "CRID-027561",
+    "corrupted_address": "8569 Redwood Pl, Hialeah 33039",
+    "expected_address": "8569 Redwood Pl, Hialeah, FL 33039",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-057",
+    "original_crid": "CRID-023596",
+    "corrupted_address": "231 Madison Ct, Greensboro, NC 2746",
+    "expected_address": "231 Madison Ct, Greensboro, NC 27467",
+    "corruption_type": "partial_zip"
+  },
+  {
+    "id": "TEST-058",
+    "original_crid": "CRID-003730",
+    "corrupted_address": "3696 Grant Rd, Orlando, FL",
+    "expected_address": "3696 Grant Rd, Orlando, FL 32830",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-059",
+    "original_crid": "CRID-013787",
+    "corrupted_address": "5779 Vlley Pkwy, Fresno, CA 93735",
+    "expected_address": "5779 Valley Pkwy, Fresno, CA 93735",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-060",
+    "original_crid": "CRID-030387",
+    "corrupted_address": "9572 Cypress Ave, Erie 16598",
+    "expected_address": "9572 Cypress Ave, Erie, PA 16598",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-061",
+    "original_crid": "CRID-021067",
+    "corrupted_address": "251 Jackson Ter Apt 530, Detroit, MI",
+    "expected_address": "251 Jackson Ter Apt 530, Detroit, MI 48252",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-062",
+    "original_crid": "CRID-001068",
+    "corrupted_address": "8540 HARRISON BLVD, PLANO, TX 75009",
+    "expected_address": "8540 Harrison Blvd, Plano, TX 75009",
+    "corruption_type": "all_caps"
+  },
+  {
+    "id": "TEST-063",
+    "original_crid": "CRID-015935",
+    "corrupted_address": "1069 Cypress Ln Apt 932, Lakewood, CO",
+    "expected_address": "1069 Cypress Ln Apt 932, Lakewood, CO 80298",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-064",
+    "original_crid": "CRID-005829",
+    "corrupted_address": "6355 Poplar Ter Suite 233, Fayetteville, NC 28314",
+    "expected_address": "6355 Poplar Ter Suite 233, Fayetteville, NC 28314",
+    "corruption_type": "phonetic_misspelling"
+  },
+  {
+    "id": "TEST-065",
+    "original_crid": "CRID-029683",
+    "corrupted_address": "8570 Ceadr Ter, Chicago, IL 60645",
+    "expected_address": "8570 Cedar Ter, Chicago, IL 60645",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-066",
+    "original_crid": "CRID-045423",
+    "corrupted_address": "3080 Pine Blvd Suite 395, NC 27487",
+    "expected_address": "3080 Pine Blvd Suite 395, Greensboro, NC 27487",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-067",
+    "original_crid": "CRID-019058",
+    "corrupted_address": "4182   Redwood   Rd  ,   Macon  ,   GA  ,   31210",
+    "expected_address": "4182 Redwood Rd, Macon, GA 31210",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-068",
+    "original_crid": "CRID-041985",
+    "corrupted_address": "1977 Chestnut Ct, Plano 75039",
+    "expected_address": "1977 Chestnut Ct, Plano, TX 75039",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-069",
+    "original_crid": "CRID-044469",
+    "corrupted_address": "8530 Adams Blvd Unit B, Durham 27791",
+    "expected_address": "8530 Adams Blvd Unit B, Durham, NC 27791",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-070",
+    "original_crid": "CRID-044352",
+    "corrupted_address": "818 Wilson Ct, Hialeah, FL",
+    "expected_address": "818 Wilson Ct, Hialeah, FL 33023",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-071",
+    "original_crid": "CRID-038179",
+    "corrupted_address": "2928   Walnut   Cir   Apt   334  ,   Fort   Collins  ,   CO  ,   80508",
+    "expected_address": "2928 Walnut Cir Apt 334, Fort Collins, CO 80508",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-072",
+    "original_crid": "CRID-007200",
+    "corrupted_address": "4036 Madiosn St Unit H, Erie, PA 16590",
+    "expected_address": "4036 Madison St Unit H, Erie, PA 16590",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-073",
+    "original_crid": "CRID-006768",
+    "corrupted_address": "5420 Ok Pl Apt 300, Irvine, CA 92603",
+    "expected_address": "5420 Oak Pl Apt 300, Irvine, CA 92603",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-074",
+    "original_crid": "CRID-021393",
+    "corrupted_address": "7099 Mangolia Ln Suite 587, Los Angeles, CA 90028",
+    "expected_address": "7099 Magnolia Ln Suite 587, Los Angeles, CA 90028",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-075",
+    "original_crid": "CRID-003542",
+    "corrupted_address": "7943   Aspen   St  ,   Stockton  ,   CA  ,   95268",
+    "expected_address": "7943 Aspen St, Stockton, CA 95268",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-076",
+    "original_crid": "CRID-003859",
+    "corrupted_address": "3995 Lincoln",
+    "expected_address": "3995 Lincoln Ln, San Francisco, CA 94172",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-077",
+    "original_crid": "CRID-018039",
+    "corrupted_address": "5479 ozk Pkwy, Albany, NY 12257",
+    "expected_address": "5479 Oak Pkwy, Albany, NY 12257",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-078",
+    "original_crid": "CRID-002317",
+    "corrupted_address": "4085 Madison",
+    "expected_address": "4085 Madison Ave, Richmond, VA 23269",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-079",
+    "original_crid": "CRID-041180",
+    "corrupted_address": "5518 Cedar Ln, CO 80226",
+    "expected_address": "5518 Cedar Ln, Thornton, CO 80226",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-080",
+    "original_crid": "CRID-013986",
+    "corrupted_address": "9993 Walnut",
+    "expected_address": "9993 Walnut Ct Apt 718, Virginia Beach, VA 23470",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-081",
+    "original_crid": "CRID-001865",
+    "corrupted_address": "4856 Pine Pl, TX 79981",
+    "expected_address": "4856 Pine Pl, El Paso, TX 79981",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-082",
+    "original_crid": "CRID-010350",
+    "corrupted_address": "9249 Willow Ct, San Diego, CA",
+    "expected_address": "9249 Willow Ct, San Diego, CA 92112",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-083",
+    "original_crid": "CRID-013646",
+    "corrupted_address": "5914 Mdison Ct, Houston, TX 77066",
+    "expected_address": "5914 Madison Ct, Houston, TX 77066",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-084",
+    "original_crid": "CRID-001258",
+    "corrupted_address": "9531 Poplar Dr, Fort Lauderdale, FL 33365",
+    "expected_address": "9531 Poplar Dr, Fort Lauderdale, FL 33365",
+    "corruption_type": "phonetic_misspelling"
+  },
+  {
+    "id": "TEST-085",
+    "original_crid": "CRID-016398",
+    "corrupted_address": "3797 Sycamore Cir Apt 966, Phoenix, AZ",
+    "expected_address": "3797 Sycamore Cir Apt 966, Phoenix, AZ 85089",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-086",
+    "original_crid": "CRID-024730",
+    "corrupted_address": "850 Adams St, Albany 12276",
+    "expected_address": "850 Adams St, Albany, NY 12276",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-087",
+    "original_crid": "CRID-029743",
+    "corrupted_address": "8689 Mill Pl Apt 827, CA 95263",
+    "expected_address": "8689 Mill Pl Apt 827, Stockton, CA 95263",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-088",
+    "original_crid": "CRID-025469",
+    "corrupted_address": "7722 Piine St Suite 472, Cincinnati, OH 45202",
+    "expected_address": "7722 Pine St Suite 472, Cincinnati, OH 45202",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-089",
+    "original_crid": "CRID-046026",
+    "corrupted_address": "2554   Maple   Ct  ,   Aurora  ,   IL  ,   60566",
+    "expected_address": "2554 Maple Ct, Aurora, IL 60566",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-090",
+    "original_crid": "CRID-003583",
+    "corrupted_address": "5496 Magnolia Ave, CA 92668",
+    "expected_address": "5496 Magnolia Ave, Irvine, CA 92668",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-091",
+    "original_crid": "CRID-042902",
+    "corrupted_address": "7399 Valley Blvd, TX 79951",
+    "expected_address": "7399 Valley Blvd, El Paso, TX 79951",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-092",
+    "original_crid": "CRID-004759",
+    "corrupted_address": "4129 Cherry Dr, Santa Ana, CA 9277",
+    "expected_address": "4129 Cherry Dr, Santa Ana, CA 92774",
+    "corruption_type": "partial_zip"
+  },
+  {
+    "id": "TEST-093",
+    "original_crid": "CRID-022870",
+    "corrupted_address": "9621 GRANT CT, ATLANTA, GA 30348",
+    "expected_address": "9621 Grant Ct, Atlanta, GA 30348",
+    "corruption_type": "all_caps"
+  },
+  {
+    "id": "TEST-094",
+    "original_crid": "CRID-040863",
+    "corrupted_address": "3575 Pine Rd, Reno 89509",
+    "expected_address": "3575 Pine Rd, Reno, NV 89509",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-095",
+    "original_crid": "CRID-008109",
+    "corrupted_address": "1143 Poplar",
+    "expected_address": "1143 Poplar Cir, Anaheim, CA 92864",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-096",
+    "original_crid": "CRID-034908",
+    "corrupted_address": "9998 BIRCH PKWY, HOUSTON, TX 77011",
+    "expected_address": "9998 Birch Pkwy, Houston, TX 77011",
+    "corruption_type": "all_caps"
+  },
+  {
+    "id": "TEST-097",
+    "original_crid": "CRID-026253",
+    "corrupted_address": "7045 Valey Cir Apt 188, Durham, NC 27749",
+    "expected_address": "7045 Valley Cir Apt 188, Durham, NC 27749",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-098",
+    "original_crid": "CRID-001129",
+    "corrupted_address": "5974 Center Ct Apt 585, Colorado Springs 80971",
+    "expected_address": "5974 Center Ct Apt 585, Colorado Springs, CO 80971",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-099",
+    "original_crid": "CRID-000141",
+    "corrupted_address": "9428 Madison St Suite 670, Dallas, TX 75294",
+    "expected_address": "9428 Madison St Suite 670, Dallas, TX 75294",
+    "corruption_type": "phonetic_misspelling"
+  },
+  {
+    "id": "TEST-100",
+    "original_crid": "CRID-045246",
+    "corrupted_address": "4516 Center",
+    "expected_address": "4516 Center Dr, San Antonio, TX 78248",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-101",
+    "original_crid": "CRID-011755",
+    "corrupted_address": "3080 Pine Blvd Suite 395, Greensboro 27487",
+    "expected_address": "3080 Pine Blvd Suite 395, Greensboro, NC 27487",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-102",
+    "original_crid": "CRID-002258",
+    "corrupted_address": "9074 Cedar Ter Unit A, Virginia Beach, VA 23422",
+    "expected_address": "9074 Cedar Ter Unit A, Virginia Beach, VA 23422",
+    "corruption_type": "phonetic_misspelling"
+  },
+  {
+    "id": "TEST-103",
+    "original_crid": "CRID-021338",
+    "corrupted_address": "611 Meadow",
+    "expected_address": "611 Meadow Ave, St. Petersburg, FL 33767",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-104",
+    "original_crid": "CRID-007290",
+    "corrupted_address": "6907 Aspen Ter, Santa Ana, California 92756",
+    "expected_address": "6907 Aspen Ter, Santa Ana, CA 92756",
+    "corruption_type": "state_full_name"
+  },
+  {
+    "id": "TEST-105",
+    "original_crid": "CRID-034024",
+    "corrupted_address": "2315 Meadow Way Suite 851, Spring Valley, NV",
+    "expected_address": "2315 Meadow Way Suite 851, Spring Valley, NV 89168",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-106",
+    "original_crid": "CRID-045503",
+    "corrupted_address": "5005 Sunset Cir Apt 329, Laredo, Texas 78090",
+    "expected_address": "5005 Sunset Cir Apt 329, Laredo, TX 78090",
+    "corruption_type": "state_full_name"
+  },
+  {
+    "id": "TEST-107",
+    "original_crid": "CRID-044032",
+    "corrupted_address": "6164 Hickory Blvd Apt 567, Tacoma 98426",
+    "expected_address": "6164 Hickory Blvd Apt 567, Tacoma, WA 98426",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-108",
+    "original_crid": "CRID-005792",
+    "corrupted_address": "2781 Jackson St, WA 98623",
+    "expected_address": "2781 Jackson St, Vancouver, WA 98623",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-109",
+    "original_crid": "CRID-009880",
+    "corrupted_address": "8486 Pine Ln, NY 10746",
+    "expected_address": "8486 Pine Ln, Yonkers, NY 10746",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-110",
+    "original_crid": "CRID-025159",
+    "corrupted_address": "393 Hckory Ave, San Antonio, TX 78246",
+    "expected_address": "393 Hickory Ave, San Antonio, TX 78246",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-111",
+    "original_crid": "CRID-043589",
+    "corrupted_address": "8902 Sycamore Pkwy, NY 13245",
+    "expected_address": "8902 Sycamore Pkwy, Syracuse, NY 13245",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-112",
+    "original_crid": "CRID-006158",
+    "corrupted_address": "6697 CEDAR TER, LAREDO, TX 78029",
+    "expected_address": "6697 Cedar Ter, Laredo, TX 78029",
+    "corruption_type": "all_caps"
+  },
+  {
+    "id": "TEST-113",
+    "original_crid": "CRID-009442",
+    "corrupted_address": "257 Aspeen Blvd, Irvine, CA 92629",
+    "expected_address": "257 Aspen Blvd, Irvine, CA 92629",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-114",
+    "original_crid": "CRID-039308",
+    "corrupted_address": "5881 dchool Ter Apt 898, Gilbert, AZ 85295",
+    "expected_address": "5881 School Ter Apt 898, Gilbert, AZ 85295",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-115",
+    "original_crid": "CRID-013566",
+    "corrupted_address": "1501 Mill Dr, Anaheim 92887",
+    "expected_address": "1501 Mill Dr, Anaheim, CA 92887",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-116",
+    "original_crid": "CRID-038127",
+    "corrupted_address": "1646 Union Pl, VA 22365",
+    "expected_address": "1646 Union Pl, Alexandria, VA 22365",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-117",
+    "original_crid": "CRID-027734",
+    "corrupted_address": "5901 Maple",
+    "expected_address": "5901 Maple Way, San Francisco, CA 94159",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-118",
+    "original_crid": "CRID-020856",
+    "corrupted_address": "2583 qdams Pkwy, Spokane, WA 99223",
+    "expected_address": "2583 Adams Pkwy, Spokane, WA 99223",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-119",
+    "original_crid": "CRID-007068",
+    "corrupted_address": "2656 Highland Dr, Henderson 89044",
+    "expected_address": "2656 Highland Dr, Henderson, NV 89044",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-120",
+    "original_crid": "CRID-048004",
+    "corrupted_address": "3423 Cherry Ln, Riverside 92583",
+    "expected_address": "3423 Cherry Ln, Riverside, CA 92583",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-121",
+    "original_crid": "CRID-019438",
+    "corrupted_address": "2437   Lincoln   Rd  ,   Fort   Collins  ,   CO  ,   80506",
+    "expected_address": "2437 Lincoln Rd, Fort Collins, CO 80506",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-122",
+    "original_crid": "CRID-029227",
+    "corrupted_address": "4136 School St, Seattle, WA",
+    "expected_address": "4136 School St, Seattle, WA 98167",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-123",
+    "original_crid": "CRID-028034",
+    "corrupted_address": "4606 Hill Dr Apt 452, TX 78782",
+    "expected_address": "4606 Hill Dr Apt 452, Austin, TX 78782",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-124",
+    "original_crid": "CRID-016508",
+    "corrupted_address": "3634 POPLAR LN, GLENDALE, AZ 85377",
+    "expected_address": "3634 Poplar Ln, Glendale, AZ 85377",
+    "corruption_type": "all_caps"
+  },
+  {
+    "id": "TEST-125",
+    "original_crid": "CRID-032240",
+    "corrupted_address": "4071 Sycamore Rd Apt 116, Sacramento 95844",
+    "expected_address": "4071 Sycamore Rd Apt 116, Sacramento, CA 95844",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-126",
+    "original_crid": "CRID-035963",
+    "corrupted_address": "6520 Main",
+    "expected_address": "6520 Main Dr, Spring Valley, NV 89141",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-127",
+    "original_crid": "CRID-041728",
+    "corrupted_address": "7102 Harrison",
+    "expected_address": "7102 Harrison Blvd Apt 803, Glendale, AZ 85369",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-128",
+    "original_crid": "CRID-010636",
+    "corrupted_address": "2408   Birch   Ave   Apt   160  ,   Chicago  ,   IL  ,   60614",
+    "expected_address": "2408 Birch Ave Apt 160, Chicago, IL 60614",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-129",
+    "original_crid": "CRID-007669",
+    "corrupted_address": "7042 Willow Ter Suite 369, Irvine, CA 92603",
+    "expected_address": "7042 Willow Ter Suite 369, Irvine, CA 92603",
+    "corruption_type": "phonetic_misspelling"
+  },
+  {
+    "id": "TEST-130",
+    "original_crid": "CRID-001458",
+    "corrupted_address": "9087 Knnedy Way Suite 350, Rockford, IL 61185",
+    "expected_address": "9087 Kennedy Way Suite 350, Rockford, IL 61185",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-131",
+    "original_crid": "CRID-026289",
+    "corrupted_address": "981 Roosevelt Way Suite 724, Seattle, WA",
+    "expected_address": "4800 Roosevelt Way Suite 724, Seattle, WA 98158",
+    "corruption_type": "swap_components"
+  },
+  {
+    "id": "TEST-132",
+    "original_crid": "CRID-026920",
+    "corrupted_address": "2625 Aspen Pkwy, Toledo, OH 4366",
+    "expected_address": "2625 Aspen Pkwy, Toledo, OH 43661",
+    "corruption_type": "partial_zip"
+  },
+  {
+    "id": "TEST-133",
+    "original_crid": "CRID-002159",
+    "corrupted_address": "6723 Mpale Way, Houston, TX 77063",
+    "expected_address": "6723 Maple Way, Houston, TX 77063",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-134",
+    "original_crid": "CRID-031219",
+    "corrupted_address": "6353 Redwood St, Fayetteville, NC 2837",
+    "expected_address": "6353 Redwood St, Fayetteville, NC 28376",
+    "corruption_type": "partial_zip"
+  },
+  {
+    "id": "TEST-135",
+    "original_crid": "CRID-042688",
+    "corrupted_address": "4492 Pakr Rd Apt 716, Macon, GA 31235",
+    "expected_address": "4492 Park Rd Apt 716, Macon, GA 31235",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-136",
+    "original_crid": "CRID-025292",
+    "corrupted_address": "5889 Redwood",
+    "expected_address": "5889 Redwood Ln, Mount Vernon, NY 10567",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-137",
+    "original_crid": "CRID-031122",
+    "corrupted_address": "2649 Redwood",
+    "expected_address": "2649 Redwood Rd, Durham, NC 27798",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-138",
+    "original_crid": "CRID-040377",
+    "corrupted_address": "864 Graant Pkwy, Dallas, TX 75272",
+    "expected_address": "864 Grant Pkwy, Dallas, TX 75272",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-139",
+    "original_crid": "CRID-021074",
+    "corrupted_address": "3713 Cypress Ave Apt 682, Atlanta, GA 3032",
+    "expected_address": "3713 Cypress Ave Apt 682, Atlanta, GA 30322",
+    "corruption_type": "partial_zip"
+  },
+  {
+    "id": "TEST-140",
+    "original_crid": "CRID-041667",
+    "corrupted_address": "1738 jakson blvd, San Antonio, TX 78280",
+    "expected_address": "1738 Jackson Blvd, San Antonio, TX 78280",
+    "corruption_type": "phonetic_misspelling"
+  },
+  {
+    "id": "TEST-141",
+    "original_crid": "CRID-015470",
+    "corrupted_address": "905 Highland Pkwy, Winston-Salem, NC",
+    "expected_address": "905 Highland Pkwy, Winston-Salem, NC 27199",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-142",
+    "original_crid": "CRID-042359",
+    "corrupted_address": "9145 Main",
+    "expected_address": "9145 Main Rd, Richmond, VA 23223",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-143",
+    "original_crid": "CRID-005734",
+    "corrupted_address": "3503 Adams Blvd Unit E, New Rochelle 10800",
+    "expected_address": "3503 Adams Blvd Unit E, New Rochelle, NY 10800",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-144",
+    "original_crid": "CRID-006338",
+    "corrupted_address": "2219 Schol Pkwy, Raleigh, NC 27682",
+    "expected_address": "2219 School Pkwy, Raleigh, NC 27682",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-145",
+    "original_crid": "CRID-000522",
+    "corrupted_address": "6979 Malpe Rd Apt 405, Orlando, FL 32879",
+    "expected_address": "6979 Maple Rd Apt 405, Orlando, FL 32879",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-146",
+    "original_crid": "CRID-048958",
+    "corrupted_address": "4171 Jackson St, Gilbert, AZ",
+    "expected_address": "4171 Jackson St, Gilbert, AZ 85217",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-147",
+    "original_crid": "CRID-047257",
+    "corrupted_address": "2907 Birch",
+    "expected_address": "2907 Birch Blvd Apt 434, Anaheim, CA 92841",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-148",
+    "original_crid": "CRID-008963",
+    "corrupted_address": "7553 Hickory Blvd, CO 80943",
+    "expected_address": "7553 Hickory Blvd, Colorado Springs, CO 80943",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-149",
+    "original_crid": "CRID-035732",
+    "corrupted_address": "8975 Highland",
+    "expected_address": "8975 Highland Way Apt 689, Macon, GA 31215",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-150",
+    "original_crid": "CRID-035072",
+    "corrupted_address": "5669 Center Pkwy Apt 447, CA 90856",
+    "expected_address": "5669 Center Pkwy Apt 447, Long Beach, CA 90856",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-151",
+    "original_crid": "CRID-030402",
+    "corrupted_address": "4144 geant Ln Apt 390, Chicago, IL 60641",
+    "expected_address": "4144 Grant Ln Apt 390, Chicago, IL 60641",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-152",
+    "original_crid": "CRID-015344",
+    "corrupted_address": "1404 Centr Pkwy Apt 167, Sparks, NV 89425",
+    "expected_address": "1404 Center Pkwy Apt 167, Sparks, NV 89425",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-153",
+    "original_crid": "CRID-019567",
+    "corrupted_address": "4466 Cedar",
+    "expected_address": "4466 Cedar Pkwy Apt 590, Spokane, WA 99299",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-154",
+    "original_crid": "CRID-049875",
+    "corrupted_address": "7897 Mll Way, Macon, GA 31277",
+    "expected_address": "7897 Mill Way, Macon, GA 31277",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-155",
+    "original_crid": "CRID-006464",
+    "corrupted_address": "1932 Hill Ct, CA 91959",
+    "expected_address": "1932 Hill Ct, Chula Vista, CA 91959",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-156",
+    "original_crid": "CRID-038904",
+    "corrupted_address": "4939 Poplar",
+    "expected_address": "4939 Poplar Way Apt 636, Grand Rapids, MI 49590",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-157",
+    "original_crid": "CRID-031009",
+    "corrupted_address": "4827 Adams",
+    "expected_address": "4827 Adams Way Apt 377, Atlanta, GA 30358",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-158",
+    "original_crid": "CRID-045118",
+    "corrupted_address": "6587 Union Dr Apt 975, Fort Worth 76171",
+    "expected_address": "6587 Union Dr Apt 975, Fort Worth, TX 76171",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-159",
+    "original_crid": "CRID-016058",
+    "corrupted_address": "7806 Waer Ct, Scottsdale, AZ 85238",
+    "expected_address": "7806 Water Ct, Scottsdale, AZ 85238",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-160",
+    "original_crid": "CRID-011945",
+    "corrupted_address": "4558 Pine Dr Suite 584, PA 18506",
+    "expected_address": "4558 Pine Dr Suite 584, Scranton, PA 18506",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-161",
+    "original_crid": "CRID-028181",
+    "corrupted_address": "2133 willoq Ter Apt 139, Houston, TX 77013",
+    "expected_address": "2133 Willow Ter Apt 139, Houston, TX 77013",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-162",
+    "original_crid": "CRID-042066",
+    "corrupted_address": "4590   Main   Pl  ,   Reno  ,   NV  ,   89529",
+    "expected_address": "4590 Main Pl, Reno, NV 89529",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-163",
+    "original_crid": "CRID-006099",
+    "corrupted_address": "750 Mill Blvd, Irving, TX",
+    "expected_address": "6349 Mill Blvd, Irving, TX 75003",
+    "corruption_type": "swap_components"
+  },
+  {
+    "id": "TEST-164",
+    "original_crid": "CRID-005848",
+    "corrupted_address": "689 Kenndy Rd, San Antonio, TX 78239",
+    "expected_address": "689 Kennedy Rd, San Antonio, TX 78239",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-165",
+    "original_crid": "CRID-027842",
+    "corrupted_address": "8973 JEFFERSON LN, TUCSON, AZ 85733",
+    "expected_address": "8973 Jefferson Ln, Tucson, AZ 85733",
+    "corruption_type": "all_caps"
+  },
+  {
+    "id": "TEST-166",
+    "original_crid": "CRID-024060",
+    "corrupted_address": "750 Madison Ln, Plano, TX",
+    "expected_address": "1940 Madison Ln, Plano, TX 75067",
+    "corruption_type": "swap_components"
+  },
+  {
+    "id": "TEST-167",
+    "original_crid": "CRID-032124",
+    "corrupted_address": "390 Lincoln Ct, FL 32211",
+    "expected_address": "390 Lincoln Ct, Jacksonville, FL 32211",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-168",
+    "original_crid": "CRID-036543",
+    "corrupted_address": "745 Sycamore Ter Apt 659, Sacramento, California 95830",
+    "expected_address": "745 Sycamore Ter Apt 659, Sacramento, CA 95830",
+    "corruption_type": "state_full_name"
+  },
+  {
+    "id": "TEST-169",
+    "original_crid": "CRID-037135",
+    "corrupted_address": "2265 Hill Ter, Lansing 48954",
+    "expected_address": "2265 Hill Ter, Lansing, MI 48954",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-170",
+    "original_crid": "CRID-034495",
+    "corrupted_address": "7061 PARK RD, ANN ARBOR, MI 48117",
+    "expected_address": "7061 Park Rd, Ann Arbor, MI 48117",
+    "corruption_type": "all_caps"
+  },
+  {
+    "id": "TEST-171",
+    "original_crid": "CRID-002985",
+    "corrupted_address": "2303   Wilson   Pl  ,   Ann   Arbor  ,   MI  ,   48193",
+    "expected_address": "2303 Wilson Pl, Ann Arbor, MI 48193",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-172",
+    "original_crid": "CRID-023444",
+    "corrupted_address": "4612 Market Pl, CO 80278",
+    "expected_address": "4612 Market Pl, Lakewood, CO 80278",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-173",
+    "original_crid": "CRID-035769",
+    "corrupted_address": "9718 Water Ter Apt 747, OH 44369",
+    "expected_address": "9718 Water Ter Apt 747, Akron, OH 44369",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-174",
+    "original_crid": "CRID-000374",
+    "corrupted_address": "4889 Hill Ave, NV 89711",
+    "expected_address": "4889 Hill Ave, Carson City, NV 89711",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-175",
+    "original_crid": "CRID-018987",
+    "corrupted_address": "7140 Broadway Ave Apt 492, Orlando, FL 32877",
+    "expected_address": "7140 Broadway Ave Apt 492, Orlando, FL 32877",
+    "corruption_type": "phonetic_misspelling"
+  },
+  {
+    "id": "TEST-176",
+    "original_crid": "CRID-003252",
+    "corrupted_address": "5354 Monroe Pkwy, Santa Ana, CA 9277",
+    "expected_address": "5354 Monroe Pkwy, Santa Ana, CA 92771",
+    "corruption_type": "partial_zip"
+  },
+  {
+    "id": "TEST-177",
+    "original_crid": "CRID-025142",
+    "corrupted_address": "6747 Miill Dr, Philadelphia, PA 19179",
+    "expected_address": "6747 Mill Dr, Philadelphia, PA 19179",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-178",
+    "original_crid": "CRID-033727",
+    "corrupted_address": "4383 Jackson Rd, Tacoma, WA 9847",
+    "expected_address": "4383 Jackson Rd, Tacoma, WA 98473",
+    "corruption_type": "partial_zip"
+  },
+  {
+    "id": "TEST-179",
+    "original_crid": "CRID-047756",
+    "corrupted_address": "5272 Wilson Way Suite 153, NC 27614",
+    "expected_address": "5272 Wilson Way Suite 153, Raleigh, NC 27614",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-180",
+    "original_crid": "CRID-008013",
+    "corrupted_address": "9833 Cherry Rd Apt 129, Columbus, GA",
+    "expected_address": "9833 Cherry Rd Apt 129, Columbus, GA 31955",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-181",
+    "original_crid": "CRID-041268",
+    "corrupted_address": "3478 Pine Ter Apt 765, Westminster, CO 8001",
+    "expected_address": "3478 Pine Ter Apt 765, Westminster, CO 80016",
+    "corruption_type": "partial_zip"
+  },
+  {
+    "id": "TEST-182",
+    "original_crid": "CRID-044964",
+    "corrupted_address": "8179 Highland Dr Apt 31, Irvine, CA",
+    "expected_address": "8179 Highland Dr Apt 31, Irvine, CA 92654",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-183",
+    "original_crid": "CRID-031292",
+    "corrupted_address": "267 Willow Way Apt 610, Erie, Pennsylvania 16534",
+    "expected_address": "267 Willow Way Apt 610, Erie, PA 16534",
+    "corruption_type": "state_full_name"
+  },
+  {
+    "id": "TEST-184",
+    "original_crid": "CRID-042571",
+    "corrupted_address": "8069 Poplar St, Alexandria 22341",
+    "expected_address": "8069 Poplar St, Alexandria, VA 22341",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-185",
+    "original_crid": "CRID-034893",
+    "corrupted_address": "7290 Franklin Ct Apt 423, AZ 85285",
+    "expected_address": "7290 Franklin Ct Apt 423, Tempe, AZ 85285",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-186",
+    "original_crid": "CRID-026342",
+    "corrupted_address": "8853   Kennedy   Pkwy  ,   Summerlin  ,   NV  ,   89172",
+    "expected_address": "8853 Kennedy Pkwy, Summerlin, NV 89172",
+    "corruption_type": "extra_whitespace"
+  },
+  {
+    "id": "TEST-187",
+    "original_crid": "CRID-017203",
+    "corrupted_address": "6606 Adams",
+    "expected_address": "6606 Adams Pl Suite 693, El Paso, TX 79923",
+    "corruption_type": "abbreviate_heavily"
+  },
+  {
+    "id": "TEST-188",
+    "original_crid": "CRID-022796",
+    "corrupted_address": "981 Birch Cir, Seattle, WA",
+    "expected_address": "4913 Birch Cir, Seattle, WA 98126",
+    "corruption_type": "swap_components"
+  },
+  {
+    "id": "TEST-189",
+    "original_crid": "CRID-029133",
+    "corrupted_address": "2420 Birch St Apt 917, NY 10833",
+    "expected_address": "2420 Birch St Apt 917, New Rochelle, NY 10833",
+    "corruption_type": "remove_city"
+  },
+  {
+    "id": "TEST-190",
+    "original_crid": "CRID-016013",
+    "corrupted_address": "3936 pSruce Pl, Mount Vernon, NY 10532",
+    "expected_address": "3936 Spruce Pl, Mount Vernon, NY 10532",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-191",
+    "original_crid": "CRID-020456",
+    "corrupted_address": "7705 Park Pkwy, Plano, TX 75034",
+    "expected_address": "7705 Park Pkwy, Plano, TX 75034",
+    "corruption_type": "phonetic_misspelling"
+  },
+  {
+    "id": "TEST-192",
+    "original_crid": "CRID-029159",
+    "corrupted_address": "7517 PPine Cir, Dallas, TX 75299",
+    "expected_address": "7517 Pine Cir, Dallas, TX 75299",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-193",
+    "original_crid": "CRID-006386",
+    "corrupted_address": "1689 MONROE CT, IRVINE, CA 92633",
+    "expected_address": "1689 Monroe Ct, Irvine, CA 92633",
+    "corruption_type": "all_caps"
+  },
+  {
+    "id": "TEST-194",
+    "original_crid": "CRID-020139",
+    "corrupted_address": "1292 Birch Ave Apt 931, Cleveland 44113",
+    "expected_address": "1292 Birch Ave Apt 931, Cleveland, OH 44113",
+    "corruption_type": "remove_state"
+  },
+  {
+    "id": "TEST-195",
+    "original_crid": "CRID-039603",
+    "corrupted_address": "7697 FOREST PKWY APT 119, DALLAS, TX 75227",
+    "expected_address": "7697 Forest Pkwy Apt 119, Dallas, TX 75227",
+    "corruption_type": "all_caps"
+  },
+  {
+    "id": "TEST-196",
+    "original_crid": "CRID-002805",
+    "corrupted_address": "9860 Sprce Ave, Fort Collins, CO 80596",
+    "expected_address": "9860 Spruce Ave, Fort Collins, CO 80596",
+    "corruption_type": "typo_in_street"
+  },
+  {
+    "id": "TEST-197",
+    "original_crid": "CRID-033035",
+    "corrupted_address": "6685 Spruce Ter Apt 980, Colorado Springs, CO",
+    "expected_address": "6685 Spruce Ter Apt 980, Colorado Springs, CO 80991",
+    "corruption_type": "remove_zip"
+  },
+  {
+    "id": "TEST-198",
+    "original_crid": "CRID-047833",
+    "corrupted_address": "969 Franklin Way Apt 805, Bakersfield, CA 9336",
+    "expected_address": "969 Franklin Way Apt 805, Bakersfield, CA 93363",
+    "corruption_type": "partial_zip"
+  },
+  {
+    "id": "TEST-199",
+    "original_crid": "CRID-039359",
+    "corrupted_address": "6163 SCHOOL BLVD SUITE 711, RENO, NV 89565",
+    "expected_address": "6163 School Blvd Suite 711, Reno, NV 89565",
+    "corruption_type": "all_caps"
+  },
+  {
+    "id": "TEST-200",
+    "original_crid": "CRID-004129",
+    "corrupted_address": "3995 Cedar Ln Suite 569, Cleveland, OH",
+    "expected_address": "3995 Cedar Ln Suite 569, Cleveland, OH 44157",
+    "corruption_type": "remove_zip"
+  }
+]

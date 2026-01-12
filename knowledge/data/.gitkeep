@@ -1,0 +1,3 @@
+# This directory contains project-specific knowledge documents
+# Files placed here will be indexed automatically at app startup
+# Supported formats: .txt, .md, .json, .pdf, .doc, .docx, .xls, .xlsx, .csv, .odt, .odf, .html
