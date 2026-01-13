@@ -10,7 +10,7 @@ REM Enable Bedrock integration (REQUIRED)
 set CLAUDE_CODE_USE_BEDROCK=1
 
 REM AWS Region (REQUIRED - Claude Code doesn't read from .aws config)
-set AWS_REGION=us-east-2
+set AWS_REGION=us-east-1
 
 REM ============================================================================
 REM AUTHENTICATION - Choose ONE method by uncommenting the appropriate section
