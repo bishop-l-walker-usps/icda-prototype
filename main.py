@@ -434,20 +434,38 @@ async def lifespan(app: FastAPI):
     _knowledge = KnowledgeManager(_embedder, opensearch_client)
     await _knowledge.ensure_index()
 
-    # Auto-index knowledge documents (scans /knowledge folder recursively)
-    # Load index state for hash-based change detection
+    # ============================================================
+    # KNOWLEDGE INDEX: Incremental indexing (NOT full scan on every startup)
+    # - First run (no state): Do initial full index
+    # - Subsequent runs: Trust saved state, rely on file watcher
+    # - Manual reindex: POST /api/knowledge/reindex?force=true
+    # ============================================================
     _index_state = load_index_state(INDEX_STATE_FILE)
+    state_has_files = len(_index_state.get("files", {})) > 0
+    state_has_full_index = _index_state.get("last_full_index") is not None
+
     if KNOWLEDGE_DIR.exists():
-        logger.info("Auto-indexing knowledge documents from /knowledge folder...")
-        result = await auto_index_knowledge_documents(_knowledge, _index_state)
-        if result["indexed"]:
-            logger.info(f"New/Modified: {result['indexed']}")
-        if result["skipped"]:
-            logger.debug(f"Unchanged (skipped): {result['skipped']}")
-        if result.get("orphans_removed"):
-            logger.info(f"Orphans removed: {result['orphans_removed']}")
-        if result["failed"]:
-            logger.warning(f"Failed: {result['failed']}")
+        if state_has_files and state_has_full_index:
+            # Existing index state - skip startup scan, rely on file watcher
+            state_stats = {
+                "tracked_files": len(_index_state.get("files", {})),
+                "total_chunks": sum(f.get("chunks_indexed", 0) for f in _index_state.get("files", {}).values())
+            }
+            logger.info(f"Knowledge index: {state_stats['tracked_files']} files, {state_stats['total_chunks']} chunks (using saved state)")
+            logger.info("  Incremental mode: file watcher active, no startup scan")
+        else:
+            # First run or empty state - do initial full index
+            logger.info("Knowledge index: initializing (first run or empty state)...")
+            result = await auto_index_knowledge_documents(_knowledge, _index_state)
+            if result["indexed"]:
+                logger.info(f"  Indexed: {result['indexed']} files")
+            if result.get("orphans_removed"):
+                logger.info(f"  Orphans removed: {result['orphans_removed']}")
+            if result["failed"]:
+                logger.warning(f"  Failed: {result['failed']}")
+            # Mark that we did the initial full index
+            mark_full_reindex(_index_state)
+            save_index_state(INDEX_STATE_FILE, _index_state)
 
     stats = await _knowledge.get_stats()
     logger.info(f"Knowledge base: {stats.get('unique_documents', 0)} docs, {stats.get('total_chunks', 0)} chunks ({stats.get('backend', 'unknown')})")
