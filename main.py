@@ -13,7 +13,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()  # Must be before importing config
 
-from fastapi import FastAPI, Request, UploadFile, File, Form
+from fastapi import FastAPI, Request, UploadFile, File, Form, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -52,6 +52,17 @@ from icda.agents.orchestrator import AddressAgentOrchestrator
 from icda.agents.models import AgentCoreMemoryConfig
 from icda.indexes.zip_database import ZipDatabase
 from icda.indexes.address_vector_index import AddressVectorIndex
+
+# Simple email authentication
+from icda.auth import (
+    EmailAuth,
+    EmailAuthConfig,
+    User,
+    get_email_auth,
+    init_email_auth,
+    get_current_user,
+    get_current_user_optional,
+)
 
 cfg = Config()  # Fresh instance after dotenv loaded
 
@@ -92,6 +103,9 @@ _download_manager: DownloadTokenManager = None
 
 # Progress Tracker global (for real-time indexing progress)
 _progress_tracker: ProgressTracker = None
+
+# Email Authentication global
+_email_auth: EmailAuth = None
 
 
 def _extract_tags_from_content(content: str, filepath: Path) -> list[str]:
@@ -229,6 +243,7 @@ async def lifespan(app: FastAPI):
     global _address_index, _address_completer, _address_pipeline
     global _zip_database, _address_vector_index, _orchestrator
     global _enforcer, _download_manager, _index_state, _progress_tracker
+    global _email_auth
 
     print("\n" + "="*50)
     print("  ICDA Startup")
@@ -248,6 +263,16 @@ async def lifespan(app: FastAPI):
     # Initialize progress tracker for real-time indexing feedback
     _progress_tracker = ProgressTracker(_cache)
     print(f"  Progress tracker: {'enabled' if _progress_tracker.available else 'disabled (no Redis)'}")
+
+    # Initialize email authentication (uses Redis for sessions)
+    auth_config = EmailAuthConfig()
+    _email_auth = init_email_auth(auth_config, _cache)
+    if auth_config.enabled:
+        domains = auth_config.get_allowed_domains()
+        domain_info = f" (domains: {', '.join(domains)})" if domains else " (all domains)"
+        print(f"  Email auth: enabled{domain_info}")
+    else:
+        print("  Email auth: disabled (set AUTH_ENABLED=true to enable)")
 
     _embedder = EmbeddingClient(cfg.aws_region, cfg.titan_embed_model, cfg.embed_dimensions)
 
@@ -630,6 +655,10 @@ async def health():
     opensearch_ok = _vector_index.available if _vector_index else False
     mode = "FULL" if nova_ok and embedder_ok else "LITE"
 
+    # Auth status
+    auth_enabled = _email_auth.config.enabled if _email_auth else False
+    auth_available = _email_auth.available if _email_auth else False
+
     # Flat structure expected by frontend
     return {
         "status": "healthy",
@@ -641,6 +670,8 @@ async def health():
         "customers": len(_db.customers) if _db else 0,
         # Extended info
         "knowledge": _knowledge.available if _knowledge else False,
+        "auth_enabled": auth_enabled,
+        "auth_available": auth_available,
     }
 
 
@@ -1044,6 +1075,97 @@ async def delete_knowledge_document(doc_id: str):
         return {"success": False, "error": "Not available"}
     result = await _knowledge.delete_document(doc_id)
     return {"success": result.get("deleted", 0) > 0, "doc_id": doc_id, **result}
+
+
+# ==================== Authentication API ====================
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=5, max_length=254)
+
+
+@app.post("/api/auth/login")
+async def auth_login(req: LoginRequest):
+    """
+    Login with email address.
+
+    Returns a session token for subsequent authenticated requests.
+    The session token should be passed via X-Session-ID header or
+    Authorization: Bearer <token> header.
+    """
+    if not _email_auth:
+        return {"success": False, "error": "Authentication not initialized"}
+
+    if not _email_auth.config.enabled:
+        return {"success": False, "error": "Authentication is disabled"}
+
+    user, error = await _email_auth.login(req.email)
+    if not user:
+        return {"success": False, "error": error}
+
+    return {
+        "success": True,
+        "session_id": user.session_id,
+        "user": {
+            "email": user.email,
+            "username": user.username,
+            "id": user.id,
+        },
+        "expires_in": _email_auth.config.session_ttl,
+    }
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(user: User = Depends(get_current_user)):
+    """
+    Logout and invalidate current session.
+
+    Requires authentication.
+    """
+    if not _email_auth:
+        return {"success": False, "error": "Authentication not initialized"}
+
+    result = await _email_auth.logout(user.session_id)
+    return {"success": result}
+
+
+@app.get("/api/auth/me")
+async def auth_me(user: User = Depends(get_current_user)):
+    """
+    Get current authenticated user.
+
+    Requires authentication.
+    """
+    return {
+        "success": True,
+        "user": {
+            "email": user.email,
+            "username": user.username,
+            "id": user.id,
+            "created_at": user.created_at.isoformat(),
+            "last_active": user.last_active.isoformat(),
+        },
+    }
+
+
+@app.get("/api/auth/status")
+async def auth_status():
+    """
+    Get authentication system status (public endpoint).
+    """
+    if not _email_auth:
+        return {
+            "enabled": False,
+            "available": False,
+            "message": "Authentication not initialized",
+        }
+
+    return {
+        "enabled": _email_auth.config.enabled,
+        "available": _email_auth.available,
+        "allow_anonymous": _email_auth.config.allow_anonymous,
+        "session_ttl": _email_auth.config.session_ttl,
+        "allowed_domains": list(_email_auth.config.get_allowed_domains()) if _email_auth.config.get_allowed_domains() else None,
+    }
 
 
 @app.post("/api/knowledge/reindex")

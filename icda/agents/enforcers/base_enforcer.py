@@ -53,6 +53,18 @@ class EnforcerGate(str, Enum):
     GRACEFUL_DEGRADATION = "graceful_degradation"
     CONTEXT_PRESERVATION = "context_preservation"
 
+    # RAG Context Gates
+    RAG_CONTEXT_INCLUDED = "rag_context_included"
+    RAG_CONFIDENCE_THRESHOLD = "rag_confidence_threshold"
+    KNOWLEDGE_CHUNK_QUALITY = "knowledge_chunk_quality"
+    CONTEXT_RELEVANCE_SCORE = "context_relevance_score"
+
+    # Directory Coverage Gates
+    DIRECTORY_COVERAGE_COMPLETE = "directory_coverage_complete"
+    FILE_TYPE_SUPPORT = "file_type_support"
+    INDEX_FRESHNESS = "index_freshness"
+    ORPHAN_DETECTION = "orphan_detection"
+
 
 @dataclass(slots=True)
 class GateResult:

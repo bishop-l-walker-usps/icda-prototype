@@ -441,7 +441,19 @@ SESSION CONTEXT:
         else:
             parts.append("NO DATA FOUND")
 
-        # Skip knowledge context to reduce tokens (search results are primary)
+        # Include knowledge context when confidence is sufficient (>= 0.3)
+        if knowledge and knowledge.chunks and knowledge.confidence >= 0.3:
+            parts.append("")
+            parts.append(f"KNOWLEDGE ({len(knowledge.chunks[:3])} chunks, conf={knowledge.confidence:.2f}):")
+            for i, chunk in enumerate(knowledge.chunks[:3], 1):
+                # Get chunk content - handle different chunk formats
+                content = chunk.get("content", chunk.get("text", ""))
+                source = chunk.get("source", chunk.get("file", "unknown"))
+                # Truncate to ~200 chars to stay under token limits
+                if len(content) > 200:
+                    content = content[:197] + "..."
+                parts.append(f"  K{i}. [{source}]: {content}")
+
         return "\n".join(parts) if parts else ""
 
     async def _converse(

@@ -19,7 +19,11 @@ from icda.address_models import (
     VerificationStatus,
 )
 from icda.address_pipeline import AddressPipeline, BatchProcessor
-
+from icda.address_batch_validator import (
+    AgentBatchValidator,
+    AddressValidationResult,
+    BatchValidationSummary,
+)
 from icda.agents.orchestrator import AddressAgentOrchestrator
 
 
@@ -31,12 +35,13 @@ router = APIRouter(prefix="/api/address", tags=["Address Verification"])
 # Global reference to pipeline (set during app startup)
 _pipeline: AddressPipeline | None = None
 _batch_processor: BatchProcessor | None = None
-_orchestrator = None  # Will be AddressAgentOrchestrator when implemented
+_orchestrator: AddressAgentOrchestrator | None = None
+_agent_batch_validator: AgentBatchValidator | None = None
 
 
 def configure_router(
     pipeline: AddressPipeline,
-    orchestrator=None,
+    orchestrator: AddressAgentOrchestrator | None = None,
 ) -> None:
     """Configure the router with pipeline dependencies.
 
@@ -44,10 +49,13 @@ def configure_router(
         pipeline: Initialized address verification pipeline.
         orchestrator: Optional 5-agent orchestrator for intelligent verification.
     """
-    global _pipeline, _batch_processor, _orchestrator
+    global _pipeline, _batch_processor, _orchestrator, _agent_batch_validator
     _pipeline = pipeline
     _batch_processor = BatchProcessor(pipeline)
     _orchestrator = orchestrator
+    # Initialize agent batch validator if orchestrator available
+    if orchestrator:
+        _agent_batch_validator = AgentBatchValidator(orchestrator)
     logger.info(f"Address router configured (orchestrator={'enabled' if orchestrator else 'disabled'})")
 
 
@@ -147,6 +155,40 @@ class BatchVerifyResponse(BaseModel):
     success: bool
     results: list[dict[str, Any]]
     summary: dict[str, Any]
+
+
+class AgentBatchVerifyRequest(BaseModel):
+    """Request model for agent-based batch address validation."""
+
+    addresses: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=10000,
+        description="List of addresses to validate",
+    )
+    concurrency: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        description="Maximum concurrent validations",
+    )
+
+
+class AgentBatchVerifyResponse(BaseModel):
+    """Response model for agent-based batch validation."""
+
+    success: bool
+    total: int
+    verified: int
+    corrected: int
+    unverified: int
+    failed: int
+    success_rate: float
+    avg_confidence: float
+    gates_pass_rate: float
+    results: list[dict[str, Any]]
+    summary: dict[str, Any]
+    top_issues: list[dict[str, Any]]
 
 
 class StreetSuggestionRequest(BaseModel):
@@ -307,6 +349,52 @@ async def verify_records(request: BatchRecordRequest) -> BatchVerifyResponse:
     )
 
 
+@router.post("/verify/agent/batch", response_model=AgentBatchVerifyResponse)
+async def verify_batch_with_agents(
+    request: AgentBatchVerifyRequest,
+) -> AgentBatchVerifyResponse:
+    """Validate a batch of addresses using the 5-agent orchestrator.
+
+    This endpoint provides high-quality batch validation with:
+    - Full agent orchestration (Context, Parser, Inference, Match, Enforcer)
+    - Quality gate enforcement per address
+    - Detailed issue categorization (typos, wrong state, missing ZIP, etc.)
+    - Corrections detection and reporting
+    - Comprehensive summary statistics
+
+    Args:
+        request: Batch validation request with addresses and concurrency.
+
+    Returns:
+        Detailed validation results with issues, corrections, and quality metrics.
+    """
+    if not _agent_batch_validator:
+        raise HTTPException(
+            status_code=503,
+            detail="Agent batch validator not initialized. Ensure orchestrator is configured."
+        )
+
+    results, summary = await _agent_batch_validator.validate_batch(
+        request.addresses,
+        concurrency=request.concurrency,
+    )
+
+    return AgentBatchVerifyResponse(
+        success=summary.success_rate > 0.5,
+        total=summary.total,
+        verified=summary.verified,
+        corrected=summary.corrected,
+        unverified=summary.unverified,
+        failed=summary.failed,
+        success_rate=summary.success_rate,
+        avg_confidence=summary.avg_confidence,
+        gates_pass_rate=summary.gates_pass_rate,
+        results=[r.to_dict() for r in results],
+        summary=summary.to_dict(),
+        top_issues=summary.to_dict().get("top_issues", []),
+    )
+
+
 @router.post("/suggest/street", response_model=StreetSuggestionResponse)
 async def suggest_street(request: StreetSuggestionRequest) -> StreetSuggestionResponse:
     """Get street name suggestions for a partial input.
@@ -396,6 +484,7 @@ async def health_check() -> dict[str, Any]:
         "pipeline": _pipeline is not None,
         "batch_processor": _batch_processor is not None,
         "orchestrator": _orchestrator is not None,
+        "agent_batch_validator": _agent_batch_validator is not None,
         "index_ready": _pipeline.index.is_indexed if _pipeline else False,
         "completer_available": _pipeline.completer.available if _pipeline else False,
     }

@@ -91,22 +91,23 @@ services:
           memory: 512M
 
   # ============================================
-  # Redis Cache
+  # Redis Stack (Cache + TimeSeries + Search + JSON + Bloom)
   # ============================================
   redis:
-    image: redis:7-alpine
+    image: redis/redis-stack-server:latest
     container_name: icda-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    environment:
+      - REDIS_ARGS=--appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 10s
     restart: unless-stopped
     networks:
       - icda-network

@@ -1,7 +1,7 @@
-"""Enforcer Coordinator - Orchestrates all memory enforcers.
+"""Enforcer Coordinator - Orchestrates all memory and RAG enforcers.
 
-Runs all 5 memory enforcers in sequence and aggregates results
-to provide a single go/no-go decision for memory operations.
+Runs all 7 enforcers in sequence and aggregates results
+to provide a single go/no-go decision for memory and RAG operations.
 """
 
 from __future__ import annotations
@@ -16,19 +16,23 @@ from .search_context_enforcer import SearchContextEnforcer
 from .nova_context_enforcer import NovaContextEnforcer
 from .response_quality_enforcer import ResponseQualityEnforcer
 from .functionality_preservation_enforcer import FunctionalityPreservationEnforcer
+from .rag_context_enforcer import RAGContextEnforcer
+from .directory_coverage_enforcer import DirectoryCoverageEnforcer
 
 logger = logging.getLogger(__name__)
 
 
 class EnforcerCoordinator:
-    """Orchestrates all 5 memory enforcers in sequence.
+    """Orchestrates all 7 memory and RAG enforcers in sequence.
 
     Execution Order:
     1. MemoryIntegrityEnforcer - Validate memory read/write
     2. SearchContextEnforcer - Validate context for search
     3. NovaContextEnforcer - Validate context for Nova
     4. ResponseQualityEnforcer - Final response validation
-    5. FunctionalityPreservationEnforcer - Meta-validation & metrics
+    5. RAGContextEnforcer - Validate knowledge chunks in context
+    6. DirectoryCoverageEnforcer - Validate directory scanning
+    7. FunctionalityPreservationEnforcer - Meta-validation & metrics
 
     The coordinator:
     - Runs enforcers in sequence (early exit on critical failure)
@@ -42,6 +46,8 @@ class EnforcerCoordinator:
         "_search_enforcer",
         "_nova_enforcer",
         "_response_enforcer",
+        "_rag_enforcer",
+        "_directory_enforcer",
         "_preservation_enforcer",
         "_enabled",
         "_fail_fast",
@@ -74,6 +80,13 @@ class EnforcerCoordinator:
             enabled=enabled, strict_mode=strict_mode
         )
         self._response_enforcer = ResponseQualityEnforcer(
+            enabled=enabled, strict_mode=strict_mode
+        )
+        # RAG enforcers
+        self._rag_enforcer = RAGContextEnforcer(
+            enabled=enabled, strict_mode=strict_mode
+        )
+        self._directory_enforcer = DirectoryCoverageEnforcer(
             enabled=enabled, strict_mode=strict_mode
         )
         self._preservation_enforcer = FunctionalityPreservationEnforcer(
@@ -159,7 +172,23 @@ class EnforcerCoordinator:
             if self._fail_fast:
                 return self._create_response(results, start_time, all_passed)
 
-        # 5. Functionality Preservation (final, with other results)
+        # 5. RAG Context
+        rag_result = await self._rag_enforcer.enforce(context)
+        results.append(rag_result)
+        if not rag_result.passed:
+            all_passed = False
+            if self._fail_fast:
+                return self._create_response(results, start_time, all_passed)
+
+        # 6. Directory Coverage
+        directory_result = await self._directory_enforcer.enforce(context)
+        results.append(directory_result)
+        if not directory_result.passed:
+            all_passed = False
+            if self._fail_fast:
+                return self._create_response(results, start_time, all_passed)
+
+        # 7. Functionality Preservation (final, with other results)
         preservation_context = {
             **context,
             "enforcer_results": results,
