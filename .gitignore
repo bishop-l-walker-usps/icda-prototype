@@ -45,4 +45,4 @@ knowledge/.index_state.json
 # Local settings (user-specific)
 settings.local.json
 
-/customer_data.json
+customer_data.json
