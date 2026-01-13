@@ -1,231 +1,398 @@
-"""Redis Stack Client - Connection management and module detection.
+"""Unified Redis Stack client with module detection and graceful degradation.
 
-Provides:
-- Unified connection to Redis Stack
-- Module availability detection (TimeSeries, Search, JSON, Bloom)
-- Health checks and memory monitoring
+Provides a single entry point for all Redis Stack functionality:
+- Automatic module detection on connect
 - Graceful degradation when modules unavailable
+- Timeout protection on all operations
+- Health monitoring
 """
 
-from __future__ import annotations
+import asyncio
+import logging
+from typing import TYPE_CHECKING
 
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
+if TYPE_CHECKING:
+    from .redis_search import RedisSearchEnhanced
+    from .redis_json import RedisJSONWrapper
+    from .redis_timeseries import RedisTimeSeriesWrapper
+    from .redis_bloom import RedisBloomWrapper
+    from .redis_pubsub import RedisPubSubManager
+    from .redis_streams import RedisStreamsManager
 
-import redis.asyncio as redis
-
-
-class RedisModule(str, Enum):
-    """Available Redis Stack modules."""
-    TIMESERIES = "timeseries"
-    SEARCH = "search"
-    JSON = "ReJSON"
-    BLOOM = "bf"
-
-
-@dataclass
-class RedisStackConfig:
-    """Configuration for Redis Stack connection."""
-    url: str = "redis://localhost:6379"
-    max_connections: int = 20
-    metrics_retention_days: int = 30
-    session_ttl_days: int = 7
-    embedding_dimensions: int = 1024
-
-    @property
-    def metrics_retention_ms(self) -> int:
-        """Convert retention days to milliseconds."""
-        return self.metrics_retention_days * 24 * 60 * 60 * 1000
-
-    @property
-    def session_ttl_seconds(self) -> int:
-        """Convert session TTL to seconds."""
-        return self.session_ttl_days * 24 * 60 * 60
+logger = logging.getLogger(__name__)
 
 
 class RedisStackClient:
-    """Redis Stack client with module detection and health monitoring.
+    """Unified client for all Redis Stack modules.
+
+    Provides:
+    - Module detection and availability tracking
+    - Graceful degradation when modules unavailable
+    - Centralized connection management
+    - Health check aggregation
 
     Usage:
-        config = RedisStackConfig(url="redis://localhost:6379")
-        client = RedisStackClient(config)
-        await client.connect()
+        client = RedisStackClient()
+        modules = await client.connect("redis://localhost:6379")
+        print(modules)  # {'search': True, 'json': True, ...}
 
-        # Check module availability
-        if client.has_module(RedisModule.TIMESERIES):
-            # Use TimeSeries features
-            pass
-
-        # Health check
-        health = await client.health_check()
+        if client.search_available:
+            results = await client.search.suggest("addr", "123 Main")
     """
 
-    __slots__ = ("_config", "_client", "_available", "_modules")
+    __slots__ = (
+        "redis", "url",
+        # Module availability
+        "search_available", "json_available", "timeseries_available",
+        "bloom_available", "graph_available",
+        # Module wrappers
+        "search", "json", "timeseries", "bloom", "pubsub", "streams",
+        # State
+        "_connected", "_modules_detected",
+    )
 
-    def __init__(self, config: RedisStackConfig | None = None):
-        """Initialize Redis Stack client.
+    # Module name mapping from MODULE LIST
+    MODULE_NAMES = {
+        "search": ["search", "ft"],
+        "json": ["rejson", "json"],
+        "timeseries": ["timeseries", "ts"],
+        "bloom": ["bf", "bloom"],
+        "graph": ["graph"],
+    }
 
-        Args:
-            config: Configuration options. Uses defaults if None.
-        """
-        self._config = config or RedisStackConfig()
-        self._client: redis.Redis | None = None
-        self._available = False
-        self._modules: dict[RedisModule, bool] = {
-            module: False for module in RedisModule
-        }
+    def __init__(self):
+        self.redis = None
+        self.url = ""
 
-    @property
-    def config(self) -> RedisStackConfig:
-        """Get configuration."""
-        return self._config
+        # Module availability flags
+        self.search_available = False
+        self.json_available = False
+        self.timeseries_available = False
+        self.bloom_available = False
+        self.graph_available = False
 
-    @property
-    def client(self) -> redis.Redis | None:
-        """Get underlying Redis client."""
-        return self._client
+        # Module wrappers (lazy initialized)
+        self.search: "RedisSearchEnhanced | None" = None
+        self.json: "RedisJSONWrapper | None" = None
+        self.timeseries: "RedisTimeSeriesWrapper | None" = None
+        self.bloom: "RedisBloomWrapper | None" = None
+        self.pubsub: "RedisPubSubManager | None" = None
+        self.streams: "RedisStreamsManager | None" = None
 
-    @property
-    def available(self) -> bool:
-        """Check if client is connected and available."""
-        return self._available
+        self._connected = False
+        self._modules_detected = {}
 
-    def has_module(self, module: RedisModule) -> bool:
-        """Check if a specific module is available.
-
-        Args:
-            module: The Redis module to check.
-
-        Returns:
-            True if module is available.
-        """
-        return self._modules.get(module, False)
-
-    async def connect(self) -> bool:
+    async def connect(self, url: str, timeout: float = 3.0) -> dict[str, bool]:
         """Connect to Redis and detect available modules.
 
+        Args:
+            url: Redis connection URL (redis://localhost:6379)
+            timeout: Connection timeout in seconds (default 3s for fast startup)
+
         Returns:
-            True if connection successful.
+            Dict of module availability: {'search': True, 'json': False, ...}
         """
+        if not url:
+            logger.info("RedisStack: No URL provided, all modules unavailable")
+            return self._get_module_status()
+
+        self.url = url
+
         try:
-            self._client = redis.from_url(
-                self._config.url,
-                max_connections=self._config.max_connections,
+            import redis.asyncio as aioredis
+
+            self.redis = aioredis.from_url(
+                url,
                 decode_responses=True,
+                socket_timeout=2.0,
+                socket_connect_timeout=2.0,
+                health_check_interval=30,
             )
 
             # Test connection
-            await self._client.ping()
+            await asyncio.wait_for(self.redis.ping(), timeout=timeout)
+            self._connected = True
+            logger.info(f"RedisStack: Connected to {url}")
 
-            # Detect modules
-            await self._detect_modules()
+            # Detect modules (quick)
+            await self._detect_modules(timeout=2.0)
 
-            self._available = True
-            print(f"RedisStack: Connected to {self._config.url}")
-            return True
+            # Initialize available module wrappers (with individual timeouts)
+            await self._init_modules(timeout=2.0)
+
+            return self._get_module_status()
+
+        except asyncio.TimeoutError:
+            logger.warning(f"RedisStack: Connection timed out after {timeout}s")
+            return self._get_module_status()
+        except ImportError:
+            logger.warning("RedisStack: redis package not installed")
+            return self._get_module_status()
         except Exception as e:
-            print(f"RedisStack: Connection failed - {e}")
-            self._available = False
-            return False
+            logger.warning(f"RedisStack: Connection failed - {e}")
+            return self._get_module_status()
 
-    async def _detect_modules(self) -> None:
-        """Detect available Redis Stack modules."""
-        if not self._client:
+    async def _detect_modules(self, timeout: float = 5.0) -> None:
+        """Detect which Redis Stack modules are available."""
+        if not self.redis:
             return
 
         try:
-            module_list = await self._client.module_list()
-            module_names = {m.get("name", "").lower() for m in module_list}
+            modules = await asyncio.wait_for(
+                self.redis.module_list(),
+                timeout=timeout
+            )
 
-            # Map module names to enum
-            self._modules[RedisModule.TIMESERIES] = "timeseries" in module_names
-            self._modules[RedisModule.SEARCH] = "search" in module_names
-            self._modules[RedisModule.JSON] = "rejson" in module_names
-            self._modules[RedisModule.BLOOM] = "bf" in module_names
+            module_names = [m.get("name", "").lower() for m in modules]
+            self._modules_detected = {name: True for name in module_names}
 
-            available_names = [m.value for m in RedisModule if self._modules[m]]
-            if available_names:
-                print(f"RedisStack: Modules available: {', '.join(available_names)}")
-            else:
-                print("RedisStack: No Stack modules detected (basic Redis mode)")
+            # Check each module type
+            for module_type, names in self.MODULE_NAMES.items():
+                available = any(name in module_names for name in names)
+                setattr(self, f"{module_type}_available", available)
+
+            logger.info(f"RedisStack modules detected: {self._modules_detected}")
+            logger.info(f"  RediSearch: {self.search_available}")
+            logger.info(f"  RedisJSON: {self.json_available}")
+            logger.info(f"  RedisTimeSeries: {self.timeseries_available}")
+            logger.info(f"  RedisBloom: {self.bloom_available}")
+
+        except asyncio.TimeoutError:
+            logger.warning(f"RedisStack: Module detection timed out")
         except Exception as e:
-            print(f"RedisStack: Module detection failed - {e}")
+            logger.warning(f"RedisStack: Module detection failed - {e}")
 
-    async def health_check(self) -> dict[str, Any]:
-        """Perform health check on Redis Stack.
+    async def _init_modules(self, timeout: float = 3.0) -> None:
+        """Initialize available module wrappers with timeout protection."""
+        # Always initialize pub/sub and streams (core Redis features)
+        if self._connected:
+            try:
+                from .redis_pubsub import RedisPubSubManager
+                self.pubsub = RedisPubSubManager(self.redis)
+                logger.info("RedisStack: Pub/Sub manager initialized")
+            except ImportError:
+                pass
+
+            try:
+                from .redis_streams import RedisStreamsManager
+                self.streams = RedisStreamsManager(self.redis)
+                try:
+                    await asyncio.wait_for(self.streams.ensure_streams(), timeout=timeout)
+                    logger.info("RedisStack: Streams manager initialized")
+                except asyncio.TimeoutError:
+                    logger.warning("RedisStack: Streams setup timed out, skipping")
+                    self.streams = None
+            except ImportError:
+                pass
+
+        # Initialize module-specific wrappers
+        if self.search_available:
+            try:
+                from .redis_search import RedisSearchEnhanced
+                self.search = RedisSearchEnhanced(self.redis)
+                logger.info("RedisStack: RediSearch wrapper initialized")
+            except ImportError:
+                pass
+
+        if self.json_available:
+            try:
+                from .redis_json import RedisJSONWrapper
+                self.json = RedisJSONWrapper(self.redis)
+                logger.info("RedisStack: RedisJSON wrapper initialized")
+            except ImportError:
+                pass
+
+        if self.timeseries_available:
+            try:
+                from .redis_timeseries import RedisTimeSeriesWrapper
+                self.timeseries = RedisTimeSeriesWrapper(self.redis)
+                try:
+                    await asyncio.wait_for(self.timeseries.ensure_timeseries(), timeout=timeout)
+                    logger.info("RedisStack: RedisTimeSeries wrapper initialized")
+                except asyncio.TimeoutError:
+                    logger.warning("RedisStack: TimeSeries setup timed out, skipping")
+                    self.timeseries_available = False
+                    self.timeseries = None
+            except ImportError:
+                pass
+
+        if self.bloom_available:
+            try:
+                from .redis_bloom import RedisBloomWrapper
+                self.bloom = RedisBloomWrapper(self.redis)
+                try:
+                    await asyncio.wait_for(self.bloom.ensure_filters(), timeout=timeout)
+                    logger.info("RedisStack: RedisBloom wrapper initialized")
+                except asyncio.TimeoutError:
+                    logger.warning("RedisStack: Bloom setup timed out, skipping")
+                    self.bloom_available = False
+                    self.bloom = None
+            except ImportError:
+                pass
+
+    def _get_module_status(self) -> dict[str, bool]:
+        """Get current module availability status."""
+        return {
+            "connected": self._connected,
+            "search": self.search_available,
+            "json": self.json_available,
+            "timeseries": self.timeseries_available,
+            "bloom": self.bloom_available,
+            "graph": self.graph_available,
+            "pubsub": self.pubsub is not None,
+            "streams": self.streams is not None,
+        }
+
+    async def health_check(self) -> dict:
+        """Check health of Redis and all modules.
 
         Returns:
-            Dict with health status and metrics.
+            Dict with overall health and per-module status.
         """
-        if not self._available or not self._client:
-            return {
-                "status": "unhealthy",
-                "connected": False,
-                "error": "Not connected",
-            }
+        result = {
+            "healthy": False,
+            "connected": self._connected,
+            "modules": self._get_module_status(),
+            "latency_ms": None,
+            "errors": [],
+        }
+
+        if not self._connected or not self.redis:
+            result["errors"].append("Not connected")
+            return result
 
         try:
-            info = await self._client.info()
-
-            return {
-                "status": "healthy",
-                "connected": True,
-                "memory_used": info.get("used_memory_human", "unknown"),
-                "memory_peak": info.get("used_memory_peak_human", "unknown"),
-                "modules": {
-                    module.value: self._modules[module]
-                    for module in RedisModule
-                },
-                "clients": info.get("connected_clients", 0),
-                "uptime_seconds": info.get("uptime_in_seconds", 0),
-            }
+            import time
+            start = time.time()
+            await asyncio.wait_for(self.redis.ping(), timeout=5.0)
+            result["latency_ms"] = int((time.time() - start) * 1000)
+            result["healthy"] = True
         except Exception as e:
-            return {
-                "status": "unhealthy",
-                "connected": True,
-                "error": str(e),
-            }
+            result["errors"].append(f"Ping failed: {e}")
 
-    async def execute(self, *args) -> Any:
-        """Execute a raw Redis command.
+        # Check individual modules
+        if self.timeseries and self.timeseries_available:
+            try:
+                await self.timeseries.health_check()
+            except Exception as e:
+                result["errors"].append(f"TimeSeries: {e}")
 
-        Args:
-            *args: Command and arguments.
-
-        Returns:
-            Command result.
-        """
-        if not self._client:
-            raise RuntimeError("Redis client not connected")
-        return await self._client.execute_command(*args)
-
-    async def exists(self, key: str) -> bool:
-        """Check if a key exists.
-
-        Args:
-            key: Key to check.
-
-        Returns:
-            True if key exists.
-        """
-        if not self._client:
-            return False
-        return await self._client.exists(key) > 0
-
-    async def pipeline(self) -> redis.client.Pipeline:
-        """Get a pipeline for batched commands.
-
-        Returns:
-            Redis pipeline.
-        """
-        if not self._client:
-            raise RuntimeError("Redis client not connected")
-        return self._client.pipeline()
+        return result
 
     async def close(self) -> None:
-        """Close the Redis connection."""
-        if self._client:
-            await self._client.close()
-            self._available = False
-            print("RedisStack: Connection closed")
+        """Close Redis connection and cleanup."""
+        if self.pubsub:
+            await self.pubsub.close()
+
+        if self.redis:
+            await self.redis.aclose()
+            self._connected = False
+            logger.info("RedisStack: Connection closed")
+
+    # =========================================================================
+    # Convenience Methods (delegate to module wrappers)
+    # =========================================================================
+
+    async def record_query_metric(
+        self,
+        latency_ms: float,
+        cache_hit: bool = False,
+        agent: str | None = None,
+        error: bool = False,
+    ) -> None:
+        """Record query metrics to TimeSeries.
+
+        Falls back to logging if TimeSeries unavailable.
+        """
+        if self.timeseries and self.timeseries_available:
+            await self.timeseries.record_query(latency_ms, cache_hit, agent, error)
+        else:
+            # Fallback: just log
+            logger.debug(f"Query metric: {latency_ms}ms, cache={cache_hit}, agent={agent}")
+
+    async def record_query_event(
+        self,
+        query: str,
+        response: str,
+        latency_ms: int,
+        agents: list[str],
+        cache_hit: bool,
+        trace_id: str = "",
+        session_id: str = "",
+        success: bool = True,
+        error: str | None = None,
+    ) -> str | None:
+        """Record query to audit stream.
+
+        Returns:
+            Event ID if recorded, None if streams unavailable.
+        """
+        if self.streams:
+            from .models import QueryEvent
+            event = QueryEvent(
+                query=query,
+                response_preview=response[:500] if response else "",
+                latency_ms=latency_ms,
+                agent_chain=agents,
+                cache_hit=cache_hit,
+                trace_id=trace_id,
+                session_id=session_id,
+                success=success,
+                error=error,
+            )
+            return await self.streams.add_query_event(event)
+        return None
+
+    async def publish_index_progress(
+        self,
+        index_name: str,
+        indexed: int,
+        total: int,
+        errors: int = 0,
+        status: str = "running",
+        elapsed: float = 0.0,
+        rate: float = 0.0,
+    ) -> None:
+        """Publish indexing progress to Pub/Sub.
+
+        Falls back to logging if Pub/Sub unavailable.
+        """
+        if self.pubsub:
+            from .models import IndexProgress
+            progress = IndexProgress(
+                index_name=index_name,
+                indexed=indexed,
+                total=total,
+                errors=errors,
+                status=status,
+                elapsed_seconds=elapsed,
+                rate_per_second=rate,
+            )
+            await self.pubsub.publish_index_progress(progress)
+        else:
+            logger.info(f"Index progress: {index_name} {indexed}/{total} ({status})")
+
+    async def check_query_seen(self, query: str) -> bool:
+        """Check if query was recently seen using Bloom filter.
+
+        Returns False if Bloom unavailable (conservative - don't skip).
+        """
+        if self.bloom and self.bloom_available:
+            return await self.bloom.query_seen(query)
+        return False
+
+    async def mark_query_seen(self, query: str) -> None:
+        """Mark query as seen in Bloom filter."""
+        if self.bloom and self.bloom_available:
+            await self.bloom.add_query(query)
+
+    async def track_trending_query(self, query: str) -> None:
+        """Track query for trending analysis."""
+        if self.bloom and self.bloom_available:
+            await self.bloom.track_query_frequency(query)
+
+    async def get_trending_queries(self, k: int = 10) -> list[tuple[str, int]]:
+        """Get top K trending queries."""
+        if self.bloom and self.bloom_available:
+            return await self.bloom.get_top_queries(k)
+        return []

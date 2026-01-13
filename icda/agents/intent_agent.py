@@ -77,6 +77,8 @@ class IntentAgent:
         r"\brelocated\b",
         r"\bhigh\s+movers?\b",
         r"\bfrequent\b",
+        # Status-qualified customer queries
+        r"\b(?:active|inactive|pending|dormant)\s+customers?\b",
     )
 
     ANALYSIS_PATTERNS = (
@@ -366,6 +368,12 @@ class IntentAgent:
             reasons.append(f"COMPLEX:multi_condition({condition_count})")
             logger.info(f"IntentAgent: COMPLEX due to {condition_count} filter conditions")
             return QueryComplexity.COMPLEX, reasons
+
+        # 1 condition = MEDIUM (single filter requires some reasoning)
+        if condition_count == 1:
+            reasons.append("MEDIUM:single_filter")
+            logger.info(f"IntentAgent: MEDIUM due to single filter condition")
+            return QueryComplexity.MEDIUM, reasons
 
         # Check for complex pattern indicators
         if self._match_patterns(query, self.COMPLEX_INDICATORS):

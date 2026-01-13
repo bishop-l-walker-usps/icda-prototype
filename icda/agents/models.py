@@ -40,6 +40,7 @@ class QualityGate(str, Enum):
     ON_TOPIC = "on_topic"               # No off-topic content
     CONFIDENCE_MET = "confidence_met"   # Above threshold
     FILTER_MATCH = "filter_match"       # Results match requested filters (state, city, etc.)
+    PR_ADDRESS_QUALITY = "pr_address_quality"  # Puerto Rico address urbanization validation
 
 
 class SearchStrategy(str, Enum):

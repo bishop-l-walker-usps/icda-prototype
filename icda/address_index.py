@@ -281,7 +281,7 @@ COMPONENT_THRESHOLDS = {
     "city": 0.80,            # Some typo tolerance
     "state": 1.0,            # Must be exact (2-letter code)
     "zip_code": 1.0,         # Must be exact
-    "urbanization": 0.75,    # PR urbanizations can have variations
+    "urbanization": 0.65,    # Was 0.75 - PR urbanizations have more variations
 }
 
 # Weights for overall similarity calculation
@@ -291,7 +291,7 @@ COMPONENT_WEIGHTS = {
     "zip_code": 0.20,        # Strong geographic anchor
     "city": 0.10,            # Supporting info
     "state": 0.10,           # Usually derived from ZIP
-    "urbanization": 0.05,    # PR-specific, important when present
+    "urbanization": 0.15,    # Was 0.05 - more important for PR addresses
 }
 
 

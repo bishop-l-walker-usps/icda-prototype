@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from icda.config import Config
-from icda.embeddings import EmbeddingClient
+from icda.embedding_client import EmbeddingClient
 from icda.vector_index import VectorIndex
 from icda.database import CustomerDB
 

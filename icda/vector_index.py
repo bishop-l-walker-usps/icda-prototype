@@ -292,6 +292,211 @@ class VectorIndex:
         except Exception:
             return 0
 
+    async def get_indexed_crids(self) -> set[str]:
+        """Get all CRIDs currently in the index using scroll API.
+
+        Returns:
+            Set of CRID strings currently indexed in OpenSearch.
+        """
+        if not self.available:
+            return set()
+
+        try:
+            if not await self.client.indices.exists(index=self.customer_index):
+                return set()
+
+            crids = set()
+            scroll_time = "2m"
+
+            # Initial search with scroll
+            resp = await self.client.search(
+                index=self.customer_index,
+                body={"query": {"match_all": {}}, "_source": ["crid"]},
+                scroll=scroll_time,
+                size=5000
+            )
+
+            scroll_id = resp.get("_scroll_id")
+            hits = resp["hits"]["hits"]
+
+            while hits:
+                for hit in hits:
+                    crid = hit["_source"].get("crid")
+                    if crid:
+                        crids.add(crid)
+
+                # Get next batch
+                resp = await self.client.scroll(scroll_id=scroll_id, scroll=scroll_time)
+                scroll_id = resp.get("_scroll_id")
+                hits = resp["hits"]["hits"]
+
+            # Clean up scroll context
+            if scroll_id:
+                try:
+                    await self.client.clear_scroll(scroll_id=scroll_id)
+                except Exception:
+                    pass
+
+            return crids
+        except Exception as e:
+            print(f"Error getting indexed CRIDs: {e}")
+            return set()
+
+    async def compute_index_delta(self, db_customers: list[dict]) -> dict:
+        """Compare database customers with indexed customers to find delta.
+
+        Args:
+            db_customers: List of customer dicts from database (must have 'crid' key).
+
+        Returns:
+            Dict with 'to_add', 'to_delete', and counts.
+        """
+        db_crids = {c["crid"] for c in db_customers if c.get("crid")}
+        indexed_crids = await self.get_indexed_crids()
+
+        to_add = db_crids - indexed_crids  # In DB but not in index
+        to_delete = indexed_crids - db_crids  # In index but not in DB
+
+        return {
+            "db_count": len(db_crids),
+            "indexed_count": len(indexed_crids),
+            "to_add": to_add,
+            "to_add_count": len(to_add),
+            "to_delete": to_delete,
+            "to_delete_count": len(to_delete),
+            "in_sync": len(to_add) == 0 and len(to_delete) == 0
+        }
+
+    async def index_customers_incremental(
+        self,
+        customers: list[dict],
+        batch_size: int = 50,
+        progress_callback: Callable = None
+    ) -> dict:
+        """Index only NEW customers (delta-based incremental indexing).
+
+        Compares CRIDs in the provided list with those in the index,
+        and only embeds + indexes the ones that are missing.
+
+        Args:
+            customers: Full list of customers from database.
+            batch_size: Number of customers per batch.
+            progress_callback: Optional async callback(processed, total).
+
+        Returns:
+            Dict with indexing results and stats.
+        """
+        if not self.available:
+            return {"success": False, "error": "OpenSearch not available", "indexed": 0}
+
+        if not self.embedder or not self.embedder.available:
+            return {"success": False, "error": "Embeddings not available", "indexed": 0}
+
+        # Compute delta
+        delta = await self.compute_index_delta(customers)
+
+        if delta["in_sync"]:
+            return {
+                "success": True,
+                "message": "Index already in sync",
+                "indexed": 0,
+                "deleted": 0,
+                "total_in_index": delta["indexed_count"]
+            }
+
+        # Build lookup for customers to add
+        customers_by_crid = {c["crid"]: c for c in customers if c.get("crid")}
+        customers_to_add = [customers_by_crid[crid] for crid in delta["to_add"] if crid in customers_by_crid]
+
+        # Ensure index exists
+        await self._ensure_customer_index()
+
+        indexed = 0
+        failed = 0
+        total_to_add = len(customers_to_add)
+
+        # Index in batches
+        for i in range(0, total_to_add, batch_size):
+            batch = customers_to_add[i:i + batch_size]
+            actions = []
+
+            for customer in batch:
+                crid = customer.get("crid")
+                if not crid:
+                    failed += 1
+                    continue
+
+                search_text = f"{customer.get('name', '')} {customer.get('address', '')} {customer.get('city', '')} {customer.get('state', '')}"
+                embedding = self.embedder.embed(search_text)
+
+                if not embedding:
+                    failed += 1
+                    continue
+
+                doc = {
+                    "crid": crid,
+                    "name": customer.get("name", ""),
+                    "address": customer.get("address", ""),
+                    "city": customer.get("city", ""),
+                    "state": customer.get("state", ""),
+                    "zip": customer.get("zip", ""),
+                    "customer_type": customer.get("customer_type", "RESIDENTIAL"),
+                    "status": customer.get("status", "ACTIVE"),
+                    "move_count": customer.get("move_count", 0),
+                    "last_move": customer.get("last_move") or "1970-01-01",
+                    "created_date": customer.get("created_date") or "1970-01-01",
+                    "search_text": search_text,
+                    "embedding": embedding
+                }
+
+                actions.append({"index": {"_index": self.customer_index, "_id": crid}})
+                actions.append(doc)
+
+            # Bulk index batch
+            if actions:
+                try:
+                    response = await self.client.bulk(body=actions, refresh=False)
+                    if response.get("errors"):
+                        for item in response["items"]:
+                            if item.get("index", {}).get("error"):
+                                failed += 1
+                            else:
+                                indexed += 1
+                    else:
+                        indexed += len(batch)
+                except Exception as e:
+                    print(f"Bulk index error: {e}")
+                    failed += len(batch)
+
+            # Progress callback
+            if progress_callback:
+                await progress_callback(indexed + failed, total_to_add)
+
+        # Delete removed customers
+        deleted = 0
+        if delta["to_delete"]:
+            for crid in delta["to_delete"]:
+                try:
+                    await self.client.delete(index=self.customer_index, id=crid, refresh=False)
+                    deleted += 1
+                except Exception:
+                    pass
+
+        # Final refresh
+        try:
+            await self.client.indices.refresh(index=self.customer_index)
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "indexed": indexed,
+            "failed": failed,
+            "deleted": deleted,
+            "total_processed": indexed + failed,
+            "total_in_index": delta["indexed_count"] + indexed - deleted
+        }
+
     async def search_customers_semantic(self, query: str, limit: int = 10, filters: dict = None) -> dict:
         """Semantic search for customers."""
         if not self.available:
@@ -324,15 +529,21 @@ class VectorIndex:
         try:
             resp = await self.client.search(index=self.customer_index, body=search_body)
             results = []
+            # CRITICAL: Filter out low-score garbage matches
+            # Scores below 0.7 are usually false positives (e.g., "Chris" matching "Charles")
+            MIN_SCORE_THRESHOLD = 0.7
             for hit in resp["hits"]["hits"]:
+                score = hit["_score"]
+                if score < MIN_SCORE_THRESHOLD:
+                    continue  # Skip garbage matches
                 src = hit["_source"]
                 results.append({
                     "crid": src["crid"], "name": src["name"], "address": src["address"],
                     "city": src["city"], "state": src["state"], "zip": src["zip"],
                     "customer_type": src["customer_type"], "status": src["status"],
-                    "move_count": src["move_count"], "score": round(hit["_score"], 4)
+                    "move_count": src["move_count"], "score": round(score, 4)
                 })
-            return {"success": True, "query": query, "count": len(results), "data": results}
+            return {"success": True, "query": query, "count": len(results), "data": results, "min_score_threshold": MIN_SCORE_THRESHOLD}
         except Exception as e:
             return {"success": False, "error": str(e), "count": 0, "data": []}
 
@@ -371,12 +582,17 @@ class VectorIndex:
         try:
             resp = await self.client.search(index=self.customer_index, body=search_body)
             results = []
+            # CRITICAL: Filter out low-score garbage matches
+            MIN_SCORE_THRESHOLD = 0.7
             for hit in resp["hits"]["hits"]:
+                score = hit["_score"]
+                if score < MIN_SCORE_THRESHOLD:
+                    continue  # Skip garbage matches
                 src = hit["_source"]
                 results.append({
                     "crid": src["crid"], "name": src["name"], "address": src["address"],
                     "city": src["city"], "state": src["state"], "move_count": src["move_count"],
-                    "score": round(hit["_score"], 4)
+                    "score": round(score, 4)
                 })
             return {"success": True, "query": query, "count": len(results), "data": results}
         except Exception as e:
@@ -392,6 +608,129 @@ class VectorIndex:
             return True
         except Exception:
             return False
+
+    # ================================================================
+    # SINGLE-DOCUMENT OPERATIONS (for incremental indexing)
+    # ================================================================
+
+    async def index_customer(self, customer: dict) -> bool:
+        """Index or update a single customer.
+
+        Args:
+            customer: Customer dict with crid, name, address, city, state, zip, etc.
+
+        Returns:
+            True if indexed successfully, False otherwise.
+        """
+        if not self.available:
+            return False
+
+        crid = customer.get("crid")
+        if not crid:
+            return False
+
+        await self.ensure_customer_index()
+
+        # Build search text for embedding
+        search_text = f"{customer.get('name', '')} {customer.get('address', '')} {customer.get('city', '')} {customer.get('state', '')} {customer.get('zip', '')}"
+
+        doc = {
+            "crid": crid,
+            "name": customer.get("name", ""),
+            "address": customer.get("address", ""),
+            "city": customer.get("city", ""),
+            "state": customer.get("state", ""),
+            "zip": customer.get("zip", ""),
+            "customer_type": customer.get("customer_type", "RESIDENTIAL"),
+            "status": customer.get("status", "ACTIVE"),
+            "move_count": customer.get("move_count", 0),
+            "last_move": customer.get("last_move_date") or "1970-01-01",
+            "created_date": customer.get("created_date", "2020-01-01"),
+            "search_text": search_text,
+        }
+
+        # Generate embedding if available
+        if self.embedder and self.embedder.available:
+            embedding = self.embedder.embed(search_text)
+            if embedding:
+                doc["embedding"] = embedding
+
+        try:
+            await self.client.index(
+                index=self.customer_index,
+                id=crid,
+                body=doc,
+                refresh=True  # Make immediately searchable
+            )
+            return True
+        except Exception as e:
+            print(f"Error indexing customer {crid}: {e}")
+            return False
+
+    async def delete_customer(self, crid: str) -> bool:
+        """Delete a single customer from the index.
+
+        Args:
+            crid: Customer ID to delete.
+
+        Returns:
+            True if deleted (or didn't exist), False on error.
+        """
+        if not self.available or not crid:
+            return False
+
+        try:
+            await self.client.delete(
+                index=self.customer_index,
+                id=crid,
+                refresh=True
+            )
+            return True
+        except Exception as e:
+            # 404 means it didn't exist - that's OK
+            if "404" in str(e) or "not_found" in str(e).lower():
+                return True
+            print(f"Error deleting customer {crid}: {e}")
+            return False
+
+    async def customer_exists(self, crid: str) -> bool:
+        """Check if a customer exists in the index.
+
+        Args:
+            crid: Customer ID to check.
+
+        Returns:
+            True if customer exists in index, False otherwise.
+        """
+        if not self.available or not crid:
+            return False
+
+        try:
+            return await self.client.exists(index=self.customer_index, id=crid)
+        except Exception:
+            return False
+
+    async def get_customer(self, crid: str) -> dict | None:
+        """Get a single customer from the index.
+
+        Args:
+            crid: Customer ID to retrieve.
+
+        Returns:
+            Customer document or None if not found.
+        """
+        if not self.available or not crid:
+            return None
+
+        try:
+            response = await self.client.get(index=self.customer_index, id=crid)
+            return response.get("_source")
+        except Exception:
+            return None
+
+    # ================================================================
+    # END SINGLE-DOCUMENT OPERATIONS
+    # ================================================================
 
     async def index_customers(self, customers: list[dict], batch_size: int = 50, progress_callback: Callable = None) -> dict:
         """Index customers into OpenSearch with embeddings."""

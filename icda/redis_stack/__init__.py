@@ -1,37 +1,33 @@
-"""ICDA Redis Stack Integration.
+"""Redis Stack integration for ICDA.
 
-Provides high-level abstractions for Redis Stack modules:
-- TimeSeries: Metrics recording and time-based analytics
-- RediSearch: Full-text and vector similarity search
-- ReJSON: Session persistence and structured data
-- Bloom: Probabilistic duplicate detection and rate limiting
+Provides unified access to all Redis Stack modules:
+- RediSearch: Full-text search with facets and suggestions
+- RedisJSON: Structured JSON document storage
+- RedisTimeSeries: Time-series metrics and analytics
+- RedisBloom: Probabilistic data structures (Bloom, Cuckoo, TopK)
+- Pub/Sub: Real-time event notifications
+- Streams: Event sourcing and audit trails
+
+All modules support graceful degradation when unavailable.
 """
 
-from .client import RedisStackClient, RedisStackConfig, RedisModule
-from .timeseries import TimeSeriesMetrics, MetricType, MetricsRecorder
-from .search import QuerySearchIndex, SimilaritySearch, IndexedQuery, QueryIntent
-from .json_store import SessionStore, PersistentSession, QueryResultStore
-from .bloom import BloomFilters, BloomFilterType
+from .client import RedisStackClient
+from .models import (
+    ModuleStatus,
+    MetricSample,
+    QueryEvent,
+    CustomerEvent,
+    IndexProgress,
+)
+from .router import router, configure_router
 
 __all__ = [
-    # Client
     "RedisStackClient",
-    "RedisStackConfig",
-    "RedisModule",
-    # TimeSeries
-    "TimeSeriesMetrics",
-    "MetricType",
-    "MetricsRecorder",
-    # Search
-    "QuerySearchIndex",
-    "SimilaritySearch",
-    "IndexedQuery",
-    "QueryIntent",
-    # JSON Store
-    "SessionStore",
-    "PersistentSession",
-    "QueryResultStore",
-    # Bloom
-    "BloomFilters",
-    "BloomFilterType",
+    "ModuleStatus",
+    "MetricSample",
+    "QueryEvent",
+    "CustomerEvent",
+    "IndexProgress",
+    "router",
+    "configure_router",
 ]

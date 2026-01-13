@@ -43,6 +43,8 @@ class AddressVectorIndex:
                 "city": {"type": "keyword"},
                 "state": {"type": "keyword"},
                 "zip_code": {"type": "keyword"},
+                "urbanization": {"type": "keyword"},
+                "is_puerto_rico": {"type": "boolean"},
                 "customer_id": {"type": "keyword"},
                 "embedding": {
                     "type": "knn_vector",
@@ -146,6 +148,8 @@ class AddressVectorIndex:
             "city": parsed.city,
             "state": parsed.state,
             "zip_code": parsed.zip_code,
+            "urbanization": parsed.urbanization,
+            "is_puerto_rico": parsed.is_puerto_rico,
             "customer_id": customer_id,
             "embedding": embedding,
         }
@@ -210,7 +214,10 @@ class AddressVectorIndex:
         return results
 
     def _create_address_text(self, parsed: ParsedAddress) -> str:
-        parts = [parsed.street_number, parsed.street_name, parsed.street_type, parsed.city, parsed.state, parsed.zip_code]
+        parts = []
+        if parsed.urbanization:
+            parts.append(f"URB {parsed.urbanization}")
+        parts.extend([parsed.street_number, parsed.street_name, parsed.street_type, parsed.city, parsed.state, parsed.zip_code])
         return " ".join(p for p in parts if p)
 
     async def count(self) -> int:

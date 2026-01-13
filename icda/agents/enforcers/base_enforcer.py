@@ -53,17 +53,10 @@ class EnforcerGate(str, Enum):
     GRACEFUL_DEGRADATION = "graceful_degradation"
     CONTEXT_PRESERVATION = "context_preservation"
 
-    # RAG Context Gates
-    RAG_CONTEXT_INCLUDED = "rag_context_included"
-    RAG_CONFIDENCE_THRESHOLD = "rag_confidence_threshold"
-    KNOWLEDGE_CHUNK_QUALITY = "knowledge_chunk_quality"
-    CONTEXT_RELEVANCE_SCORE = "context_relevance_score"
-
-    # Directory Coverage Gates
-    DIRECTORY_COVERAGE_COMPLETE = "directory_coverage_complete"
-    FILE_TYPE_SUPPORT = "file_type_support"
-    INDEX_FRESHNESS = "index_freshness"
-    ORPHAN_DETECTION = "orphan_detection"
+    # Puerto Rico Address Gates
+    PR_URBANIZATION_REQUIRED = "pr_urbanization_required"
+    PR_FORMAT_PRESERVED = "pr_format_preserved"
+    PR_CONFIDENCE_MAINTAINED = "pr_confidence_maintained"
 
 
 @dataclass(slots=True)

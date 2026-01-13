@@ -37,7 +37,13 @@ class RedisCache:
             
         try:
             import redis.asyncio as aioredis
-            self.client = aioredis.from_url(url, decode_responses=True)
+            self.client = aioredis.from_url(
+                url,
+                decode_responses=True,
+                socket_timeout=5.0,           # 5s timeout for read/write operations
+                socket_connect_timeout=5.0,   # 5s timeout for connection
+                health_check_interval=30,     # Periodic health checks
+            )
             await self.client.ping()
             self.available = True
             print(f"Cache: Redis connected ({url})")

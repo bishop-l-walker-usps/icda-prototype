@@ -1,11 +1,11 @@
 """Nova AI-powered address completion and correction.
 
 Supports LITE MODE (no AWS) with fallback to fuzzy matching only.
+Includes circuit breaker protection for resilient operation.
 """
 
 import json
 import logging
-import os
 import re
 from typing import Any
 
@@ -16,6 +16,8 @@ from icda.address_models import (
 )
 from icda.address_index import AddressIndex, MatchResult
 from icda.address_normalizer import AddressNormalizer
+from icda.config import cfg
+from icda.utils.resilience import CircuitBreaker, CircuitOpenError
 
 
 logger = logging.getLogger(__name__)
@@ -44,7 +46,15 @@ CRITICAL RULES:
 - If matched=true, the completed_address MUST be copied exactly from a candidate
 - Street numbers must match exactly (101 cannot match 102)
 - If uncertain, set matched=false - it's better to reject than accept a bad match
-- Confidence should be 0.9+ only for very clear matches"""
+- Confidence should be 0.9+ only for very clear matches
+
+PUERTO RICO SPECIAL HANDLING:
+- PR addresses (ZIP 006-009) require an URBANIZATION (URB) field for deliverability
+- URB identifies the subdivision and is CRITICAL - same address can exist in multiple URBs
+- Format: URB [NAME] on a separate line before the street address
+- Spanish street terms: CALLE (street), AVENIDA (avenue), RESIDENCIAL (public housing)
+- If a PR address lacks urbanization, flag "missing_urbanization": true in your response
+- Common urbanization names: VILLA CAROLINA, LAS GLADIOLAS, CONDADO, LEVITTOWN"""
 
     _COMPLETION_PROMPT = """Analyze this partial address and find the best match:
 
@@ -57,6 +67,8 @@ PARSED COMPONENTS:
 - City: {city}
 - State: {state}
 - ZIP: {zip_code}
+- Urbanization: {urbanization}
+- Is Puerto Rico: {is_puerto_rico}
 
 CANDIDATE ADDRESSES IN THIS AREA:
 {candidates}
@@ -79,7 +91,11 @@ Respond with JSON only:
     "alternatives": [
         {{"address": "full address string", "confidence": 0.0-1.0}}
     ]
-}}"""
+}}
+
+For Puerto Rico addresses (ZIP 006-009):
+- Include "urbanization" field in completed_address if available
+- Set "missing_urbanization": true if PR address lacks URB"""
 
     def __init__(
         self,
@@ -99,6 +115,13 @@ Respond with JSON only:
         self.index = address_index
         self._client = None
         self.available = False
+
+        # Circuit breaker for Nova API protection
+        self._circuit_breaker = CircuitBreaker(
+            name="nova_address_completer",
+            threshold=cfg.circuit_breaker_threshold,
+            reset_timeout=cfg.circuit_breaker_reset_timeout,
+        )
 
         # Check if AWS credentials are available (supports default credential chain)
         try:
@@ -121,8 +144,20 @@ Respond with JSON only:
         parsed: ParsedAddress,
         fuzzy_matches: list[MatchResult],
     ) -> VerificationResult:
-        """Use Nova to complete a partial address (or fallback to fuzzy)."""
+        """Use Nova to complete a partial address (or fallback to fuzzy).
+
+        Uses circuit breaker to protect against cascading failures.
+        Falls back to fuzzy matching if Nova is unavailable or circuit is open.
+        """
+        # Check availability and circuit breaker
         if not self.available:
+            return self._fallback_completion(parsed, fuzzy_matches)
+
+        if not self._circuit_breaker.is_available():
+            logger.warning(
+                f"Circuit breaker open for Nova - using fallback. "
+                f"State: {self._circuit_breaker.get_state()}"
+            )
             return self._fallback_completion(parsed, fuzzy_matches)
 
         # Build candidate list for Nova
@@ -130,14 +165,17 @@ Respond with JSON only:
 
         # If we have a ZIP but limited candidates, get more from ZIP
         if parsed.zip_code and len(fuzzy_matches) < 5:
-            zip_addresses = self.index.lookup_by_zip(parsed.zip_code)
-            additional = [
-                f"- {addr.parsed.single_line}"
-                for addr in zip_addresses[:10]
-                if addr not in [m.address for m in fuzzy_matches]
-            ]
-            if additional:
-                candidates += "\n" + "\n".join(additional)
+            try:
+                zip_addresses = self.index.lookup_by_zip(parsed.zip_code)
+                additional = [
+                    f"- {addr.parsed.single_line}"
+                    for addr in zip_addresses[:10]
+                    if addr not in [m.address for m in fuzzy_matches]
+                ]
+                if additional:
+                    candidates += "\n" + "\n".join(additional)
+            except Exception as e:
+                logger.warning(f"Failed to get ZIP candidates: {e}")
 
         prompt = self._COMPLETION_PROMPT.format(
             input_address=parsed.raw,
@@ -146,20 +184,32 @@ Respond with JSON only:
             city=parsed.city or "unknown",
             state=parsed.state or "unknown",
             zip_code=parsed.zip_code or "unknown",
+            urbanization=parsed.urbanization or "unknown",
+            is_puerto_rico=parsed.is_puerto_rico,
             candidates=candidates or "No candidates available",
         )
 
         try:
             from botocore.exceptions import ClientError
             response = self._call_nova(prompt)
+            self._circuit_breaker.record_success()
             return self._parse_completion_response(response, parsed, fuzzy_matches)
         except ClientError as e:
             logger.error(f"Nova API error: {e}")
-            self.available = False
+            self._circuit_breaker.record_failure()
             return self._fallback_completion(parsed, fuzzy_matches)
         except Exception as e:
             logger.error(f"Address completion error: {e}")
+            self._circuit_breaker.record_failure()
             return self._fallback_completion(parsed, fuzzy_matches)
+
+    def get_circuit_state(self) -> dict[str, Any]:
+        """Get circuit breaker state for monitoring."""
+        return self._circuit_breaker.get_state()
+
+    def reset_circuit(self) -> None:
+        """Manually reset the circuit breaker."""
+        self._circuit_breaker.reset()
 
     async def suggest_street_completion(
         self,

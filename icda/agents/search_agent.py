@@ -320,6 +320,9 @@ class SearchAgent:
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Fuzzy/typo-tolerant search.
 
+        IMPORTANT: This uses STRICT matching (prefix/contains only).
+        For "similar to" queries, use _similarity_search() instead.
+
         Args:
             parsed: Parsed query.
 
@@ -329,7 +332,13 @@ class SearchAgent:
         if not hasattr(self._db, "autocomplete_fuzzy"):
             return [], {"error": "Fuzzy search not available"}
 
-        # Try to search on name or city
+        # Check if this is a "similar to" query - route to similarity search
+        query_lower = parsed.normalized_query.lower()
+        similarity_phrases = ("similar to", "like ", "sounds like", "resembles")
+        if any(phrase in query_lower for phrase in similarity_phrases):
+            return await self._similarity_search(parsed)
+
+        # Try to search on name or city - STRICT matching only
         results = []
         query_terms = parsed.normalized_query.split()
 
@@ -353,7 +362,69 @@ class SearchAgent:
                 seen.add(crid)
                 unique_results.append(r)
 
-        return unique_results, {"method": "fuzzy", "terms_searched": query_terms[:3]}
+        return unique_results, {"method": "fuzzy_strict", "terms_searched": query_terms[:3]}
+
+    async def _similarity_search(
+        self,
+        parsed: ParsedQuery,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Search for names SIMILAR to query using Levenshtein distance.
+
+        Use this for "find names similar to Chris" -> returns Chris, Charles, Christian, etc.
+        This is different from fuzzy_search which only does strict prefix/contains matching.
+
+        Args:
+            parsed: Parsed query.
+
+        Returns:
+            Tuple of (results, metadata).
+        """
+        if not hasattr(self._db, "search_similar_names"):
+            # Fall back to fuzzy if similarity not available
+            logger.warning("search_similar_names not available, falling back to fuzzy")
+            return [], {"error": "Similarity search not available"}
+
+        # Extract the name to search for
+        query_lower = parsed.normalized_query.lower()
+        
+        # Remove "similar to", "like", etc. to get the actual name
+        name = query_lower
+        for phrase in ("similar to ", "names similar to ", "like ", "sounds like ", "resembles "):
+            name = name.replace(phrase, "")
+        
+        # Also remove common prefixes
+        for prefix in ("find ", "search ", "customers named ", "named ", "name "):
+            name = name.replace(prefix, "")
+        
+        name = name.strip()
+        
+        if len(name) < 2:
+            return [], {"error": "Name too short for similarity search"}
+
+        try:
+            # Get state filter if present
+            state = parsed.filters.get("state")
+            
+            result = self._db.search_similar_names(
+                name=name,
+                limit=parsed.limit or 20,
+                state=state,
+            )
+            
+            if result.get("success"):
+                data = result.get("data", [])
+                return data, {
+                    "method": "similarity_levenshtein",
+                    "search_name": name,
+                    "state_filter": state,
+                    "total": result.get("total", 0),
+                }
+            else:
+                return [], {"error": result.get("error", "Similarity search failed")}
+
+        except Exception as e:
+            logger.warning(f"Similarity search failed for '{name}': {e}")
+            return [], {"error": str(e)}
 
     async def _semantic_search(
         self,

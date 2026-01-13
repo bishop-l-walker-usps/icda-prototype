@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .embeddings import EmbeddingClient
+from .embedding_client import EmbeddingClient
 
 
 class DocumentProcessor:

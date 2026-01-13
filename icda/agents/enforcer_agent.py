@@ -172,6 +172,15 @@ class EnforcerAgent:
         else:
             gates_failed.append(filter_result)
 
+        # Gate 9: PR Address Quality - validate Puerto Rico addresses have urbanization
+        pr_address_result, pr_penalty = self._check_pr_address_quality(
+            modified, nova_response.tool_results
+        )
+        if pr_address_result.passed:
+            gates_passed.append(pr_address_result)
+        else:
+            gates_failed.append(pr_address_result)
+
         # Optional: LLM AI-powered validation for hallucination detection
         llm_quality_boost = 0.0
         if self._llm_enforcer and self._llm_enforcer.available:
@@ -215,10 +224,12 @@ class EnforcerAgent:
                 logger.warning(f"LLM validation failed: {e}")
                 # Continue without LLM - graceful degradation
 
-        # Calculate quality score (with optional LLM boost)
+        # Calculate quality score (with optional LLM boost and PR penalty)
         total_gates = len(gates_passed) + len(gates_failed)
         quality_score = len(gates_passed) / total_gates if total_gates > 0 else 0.0
         quality_score = min(1.0, quality_score + llm_quality_boost)
+        # Apply PR address penalty (caps penalty at 0.5 to avoid zeroing out score)
+        quality_score = max(0.0, quality_score - min(pr_penalty, 0.5))
 
         # Determine status
         status = self._determine_status(
@@ -665,6 +676,73 @@ class EnforcerAgent:
             passed=True,
             message="Results match requested filters",
         )
+
+    def _check_pr_address_quality(
+        self,
+        response: str,
+        tool_results: list[dict[str, Any]],
+        knowledge_chunks: list[dict[str, Any]] | None = None,
+    ) -> tuple[QualityGateResult, float]:
+        """Check Puerto Rico address quality including urbanization validation.
+
+        Returns:
+            Tuple of (QualityGateResult, confidence_penalty).
+        """
+        # Extract PR addresses from tool results
+        pr_addresses = []
+        for result in tool_results:
+            if isinstance(result, dict):
+                # Check for is_puerto_rico flag or ZIP 006-009
+                # Handle both flat results and nested data/results structures
+                items = result.get("data", result.get("results", []))
+                if not items and "zip_code" in result:
+                    # Single result format
+                    items = [result]
+
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    zip_code = item.get("zip_code", item.get("zip", ""))
+                    if zip_code and len(str(zip_code)) >= 3:
+                        prefix = str(zip_code)[:3]
+                        if prefix in ("006", "007", "008", "009"):
+                            pr_addresses.append(item)
+
+        if not pr_addresses:
+            return QualityGateResult(
+                gate=QualityGate.PR_ADDRESS_QUALITY,
+                passed=True,
+                message="No Puerto Rico addresses in results",
+            ), 0.0
+
+        # Validate each PR address
+        issues = []
+        total_penalty = 0.0
+
+        for addr in pr_addresses:
+            urbanization = addr.get("urbanization", addr.get("urb"))
+            if not urbanization:
+                zip_display = addr.get("zip_code", addr.get("zip", "unknown"))
+                issues.append(f"PR address missing urbanization: ZIP {zip_display}")
+                total_penalty += 0.25
+
+        if issues:
+            return QualityGateResult(
+                gate=QualityGate.PR_ADDRESS_QUALITY,
+                passed=False,
+                message=f"PR address issues: {'; '.join(issues)}",
+                details={
+                    "pr_addresses_found": len(pr_addresses),
+                    "issues": issues,
+                    "confidence_penalty": total_penalty,
+                },
+            ), total_penalty
+
+        return QualityGateResult(
+            gate=QualityGate.PR_ADDRESS_QUALITY,
+            passed=True,
+            message=f"All {len(pr_addresses)} PR addresses validated with urbanization",
+        ), 0.0
 
     def _determine_status(
         self,
