@@ -266,15 +266,17 @@ async def lifespan(app: FastAPI):
     logger.info("ICDA Startup")
     logger.info("=" * 50)
 
-    # Startup - Redis is REQUIRED
+    # Startup - Redis with graceful degradation
     _cache = RedisCache(cfg.cache_ttl)
     await _cache.connect(cfg.redis_url)
-    # Clear stale cache entries on startup to ensure fresh responses
-    await _cache.clear()
-    logger.info("Cache cleared on startup (removing stale entries)")
-    if not _cache.available:
-        logger.critical("Redis is REQUIRED but not available! Start Redis with: docker-compose up -d redis")
-        raise RuntimeError("Redis is required for ICDA")
+    if _cache.available:
+        # Clear stale cache entries on startup to ensure fresh responses
+        await _cache.clear()
+        logger.info("Cache cleared on startup (removing stale entries)")
+    else:
+        logger.warning("Redis not available at startup - using in-memory fallback")
+        logger.warning("Redis will auto-reconnect when available (checked on each health request)")
+        logger.info("Start Redis with: docker-compose up -d redis")
 
     # Initialize progress tracker for real-time indexing feedback
     _progress_tracker = ProgressTracker(_cache)
@@ -761,10 +763,20 @@ async def paginate_results(token: str, offset: int = 0, limit: int = 15):
 
 @app.get("/api/health")
 async def health():
-    """Health check with mode status - flat structure for frontend compatibility"""
+    """Health check with mode status - flat structure for frontend compatibility.
+
+    Automatically attempts to reconnect to Redis if connection was lost.
+    """
     nova_ok = _nova.available if _nova else False
     embedder_ok = _embedder.available if _embedder else False
-    redis_ok = _cache.available if _cache else False
+
+    # Try to reconnect to Redis if not connected
+    redis_ok = False
+    if _cache:
+        if not _cache.available:
+            await _cache.reconnect()
+        redis_ok = _cache.available
+
     opensearch_ok = _vector_index.available if _vector_index else False
     mode = "FULL" if nova_ok and embedder_ok else "LITE"
 
