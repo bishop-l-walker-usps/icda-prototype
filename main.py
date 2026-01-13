@@ -436,26 +436,34 @@ async def lifespan(app: FastAPI):
 
     # ============================================================
     # KNOWLEDGE INDEX: Incremental indexing (NOT full scan on every startup)
-    # - First run (no state): Do initial full index
+    # - First run (no state files): Do initial full index
     # - Subsequent runs: Trust saved state, rely on file watcher
     # - Manual reindex: POST /api/knowledge/reindex?force=true
+    #
+    # ROOT CAUSE FIX: Only check if files exist in state, NOT last_full_index
+    # The last_full_index field was often null in legacy state files, causing
+    # every startup to think it was "first run" and do a full scan.
     # ============================================================
     _index_state = load_index_state(INDEX_STATE_FILE)
     state_has_files = len(_index_state.get("files", {})) > 0
-    state_has_full_index = _index_state.get("last_full_index") is not None
 
     if KNOWLEDGE_DIR.exists():
-        if state_has_files and state_has_full_index:
+        if state_has_files:
             # Existing index state - skip startup scan, rely on file watcher
             state_stats = {
                 "tracked_files": len(_index_state.get("files", {})),
                 "total_chunks": sum(f.get("chunks_indexed", 0) for f in _index_state.get("files", {}).values())
             }
             logger.info(f"Knowledge index: {state_stats['tracked_files']} files, {state_stats['total_chunks']} chunks (using saved state)")
-            logger.info("  Incremental mode: file watcher active, no startup scan")
+            logger.info("  Incremental mode: file watcher active, NO startup scan")
+            # Ensure last_full_index is set (fixes legacy state files with null)
+            if _index_state.get("last_full_index") is None:
+                mark_full_reindex(_index_state)
+                save_index_state(INDEX_STATE_FILE, _index_state)
+                logger.info("  Fixed legacy state: set last_full_index marker")
         else:
-            # First run or empty state - do initial full index
-            logger.info("Knowledge index: initializing (first run or empty state)...")
+            # First run - no files in state, do initial full index
+            logger.info("Knowledge index: FIRST RUN - indexing all documents...")
             result = await auto_index_knowledge_documents(_knowledge, _index_state)
             if result["indexed"]:
                 logger.info(f"  Indexed: {result['indexed']} files")
@@ -1923,6 +1931,62 @@ async def admin_export_stats():
                 "federation_enabled": cfg.enable_federation,
                 "enforcer_enabled": cfg.enable_llm_enforcer,
                 "admin_enabled": cfg.admin_enabled
+            }
+        }
+    }
+
+
+@app.get("/api/admin/config/embeddings")
+async def admin_embedding_config():
+    """Get current embedding configuration and provider status.
+
+    Returns embedding provider settings, model info, and availability status.
+    """
+    if not cfg.admin_enabled:
+        return {"success": False, "error": "Admin API disabled"}
+
+    # Get embedding client info
+    embedding_info = {
+        "available": _embedder.available if _embedder else False,
+        "provider": "titan",
+        "model": cfg.titan_model if hasattr(cfg, 'titan_model') else "amazon.titan-embed-text-v2:0",
+        "dimensions": 1024,
+        "region": cfg.aws_region,
+    }
+
+    # Check if we can get more details from the embedder
+    if _embedder and hasattr(_embedder, 'model_id'):
+        embedding_info["model"] = _embedder.model_id
+
+    # Try to get ingestion config if available
+    ingestion_config = None
+    try:
+        from icda.ingestion import IngestionConfig, EmbeddingProviderConfig
+        config = IngestionConfig.from_env()
+        ingestion_config = {
+            "primary_provider": config.embeddings.primary_provider,
+            "fallback_order": config.embeddings.fallback_order,
+            "target_dimension": config.embeddings.target_dimension,
+            "enable_normalization": config.embeddings.enable_normalization,
+            "batch_size": config.embeddings.batch_size,
+            "titan_model": config.embeddings.titan_model,
+            "circuit_breaker_threshold": config.embeddings.circuit_breaker_threshold,
+            "circuit_breaker_timeout": config.embeddings.circuit_breaker_timeout,
+        }
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"Could not load ingestion config: {e}")
+
+    return {
+        "success": True,
+        "config": {
+            "current_provider": embedding_info,
+            "ingestion": ingestion_config,
+            "services": {
+                "titan_embeddings": _embedder.available if _embedder else False,
+                "opensearch_vectors": _vector_index.available if _vector_index else False,
+                "address_embeddings": _address_embedder.available if _address_embedder else False,
             }
         }
     }
