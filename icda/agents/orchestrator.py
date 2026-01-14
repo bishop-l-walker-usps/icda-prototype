@@ -3,12 +3,17 @@
 This module implements a multi-agent architecture for intelligent
 address verification with context awareness and multi-state support.
 
-The 5 agents are:
-1. Context Agent - Extracts geographic context from conversation history
-2. Parser Agent - Normalizes and parses raw address input
-3. Inference Agent - Infers missing components (state, city, ZIP)
-4. Match Agent - Finds matches using fuzzy + semantic search
-5. Enforcer Agent - Validates results with quality gates
+NOTE: The agents in this module are specifically for ADDRESS verification.
+They are named with "Address" prefix to distinguish from the query
+pipeline agents (ContextAgent, ParserAgent, EnforcerAgent in the main
+query orchestrator).
+
+The 5 address agents are:
+1. AddressContextAgent - Extracts geographic context from conversation history
+2. AddressParserAgent - Normalizes and parses raw address input
+3. InferenceAgent - Infers missing components (state, city, ZIP)
+4. MatchAgent - Finds matches using fuzzy + semantic search
+5. AddressEnforcerAgent - Validates results with quality gates
 """
 
 import logging
@@ -75,8 +80,12 @@ class PipelineTrace:
         }
 
 
-class ContextAgent:
-    """Extracts geographic context from conversation history."""
+class AddressContextAgent:
+    """Extracts geographic context from conversation history.
+
+    NOTE: This is the address-specific ContextAgent for the 5-agent address
+    verification pipeline. For query pipeline agents, see context_agent.py.
+    """
 
     def extract_context(
         self,
@@ -180,7 +189,7 @@ class ContextAgent:
         return None
 
 
-class ParserAgent:
+class AddressParserAgent:
     """Normalizes and parses raw address input."""
 
     def __init__(self):
@@ -218,7 +227,7 @@ class InferenceAgent:
 
         Args:
             parsed: Parsed address with possibly missing components.
-            context: Geographic context from ContextAgent.
+            context: Geographic context from AddressContextAgent.
 
         Returns:
             Tuple of (updated address, inference metadata).
@@ -358,7 +367,7 @@ class MatchAgent:
         return alternatives, multi_state_results
 
 
-class EnforcerAgent:
+class AddressEnforcerAgent:
     """Validates results with quality gates."""
 
     def __init__(self, zip_database: ZipDatabase | None):
@@ -494,11 +503,11 @@ class AddressAgentOrchestrator:
             zip_database: ZIP code database.
             vector_index: Vector index for semantic search.
         """
-        self.context_agent = ContextAgent()
-        self.parser_agent = ParserAgent()
+        self.context_agent = AddressContextAgent()
+        self.parser_agent = AddressParserAgent()
         self.inference_agent = InferenceAgent(address_index, zip_database)
         self.match_agent = MatchAgent(address_index, vector_index)
-        self.enforcer_agent = EnforcerAgent(zip_database)
+        self.enforcer_agent = AddressEnforcerAgent(zip_database)
 
         self._process_count = 0
         self._total_time_ms = 0

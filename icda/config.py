@@ -199,6 +199,29 @@ class Config:
         default_factory=lambda: _parse_bool(getenv("ENABLE_AGENTCORE_MEMORY", ""), True)
     )
 
+    # ==================== Databricks SQL (optional - for Delta table access) ====================
+    use_databricks: bool = field(
+        default_factory=lambda: _parse_bool(getenv("USE_DATABRICKS", ""), False)
+    )
+    databricks_server_hostname: str = field(
+        default_factory=lambda: getenv("DATABRICKS_SERVER_HOSTNAME", "")
+    )
+    databricks_http_path: str = field(
+        default_factory=lambda: getenv("DATABRICKS_HTTP_PATH", "")
+    )
+    databricks_token: str = field(
+        default_factory=lambda: getenv("DATABRICKS_TOKEN", "")
+    )
+    databricks_catalog: str = field(
+        default_factory=lambda: getenv("DATABRICKS_CATALOG", "main")
+    )
+    databricks_schema: str = field(
+        default_factory=lambda: getenv("DATABRICKS_SCHEMA", "default")
+    )
+    databricks_customers_table: str = field(
+        default_factory=lambda: getenv("DATABRICKS_CUSTOMERS_TABLE", "customers")
+    )
+
     def get_index_config(self) -> dict[str, str]:
         """Get index name configuration for IndexFederation."""
         return {
@@ -218,6 +241,15 @@ class Config:
             self.openai_api_key or
             self.anthropic_api_key or
             self.openrouter_api_key
+        )
+
+    def is_databricks_configured(self) -> bool:
+        """Check if Databricks is fully configured."""
+        return bool(
+            self.use_databricks and
+            self.databricks_server_hostname and
+            self.databricks_http_path and
+            self.databricks_token
         )
 
 

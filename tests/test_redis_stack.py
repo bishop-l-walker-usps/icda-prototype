@@ -20,12 +20,12 @@ from time import time
 # Skip entire module - test expects different API than current implementation
 pytestmark = pytest.mark.skip(reason="Test expects different redis_stack API - needs update")
 
-# These imports would fail with current implementation
-# from icda.redis_stack.client import RedisStackClient, RedisStackConfig, RedisModule
-# from icda.redis_stack.timeseries import TimeSeriesMetrics, MetricType, MetricsRecorder
-# from icda.redis_stack.search import QuerySearchIndex, SimilaritySearch, IndexedQuery, QueryIntent
-# from icda.redis_stack.json_store import SessionStore, PersistentSession, QueryResultStore
-# from icda.redis_stack.bloom import BloomFilters, BloomFilterType
+# These old modules were removed - replaced by:
+# - redis_search.py (RediSearch)
+# - redis_json.py (RedisJSON)
+# - redis_timeseries.py (RedisTimeSeries)
+# - redis_bloom.py (RedisBloom)
+# See icda.redis_stack.client.RedisStackClient for unified API
 
 # Mock classes for type checking
 RedisStackClient = None

@@ -70,11 +70,26 @@ from icda.agents.models import AgentCoreMemoryConfig
 from icda.indexes.zip_database import ZipDatabase
 from icda.indexes.address_vector_index import AddressVectorIndex
 from icda.indexes.redis_vector_index import RedisAddressIndex
+from icda.indexes.index_federation import IndexFederation
 from icda.embeddings.address_embedder import AddressEmbedder
 from icda.llm.nova_reranker import NovaAddressReranker
 from icda.address_completion_pipeline import AddressCompletionPipeline, CompletionSource
 from icda.completion_router import router as completion_router, configure_completion_router
 from icda.redis_stack.router import router as redis_stack_router, configure_router as configure_redis_stack_router
+from icda.auth import (
+    EmailAuth,
+    EmailAuthConfig,
+    User,
+    init_email_auth,
+    get_email_auth,
+    get_current_user,
+    get_current_user_optional,
+)
+from icda.ingestion import (
+    IngestionPipeline,
+    IngestionConfig,
+    IngestionBatchResult,
+)
 
 cfg = Config()  # Fresh instance after dotenv loaded
 
@@ -124,6 +139,15 @@ _progress_tracker: ProgressTracker = None
 
 # Redis Stack unified client (provides all Redis Stack modules)
 _redis_stack: RedisStackClient = None
+
+# Index Federation (unified federated search across all indexes)
+_federation: IndexFederation = None
+
+# Email Authentication (simple email-based auth with session tokens)
+_email_auth: EmailAuth = None
+
+# Address Data Ingestion Pipeline (NCOA, webhooks, file drops)
+_ingestion_pipeline: IngestionPipeline = None
 
 
 def _extract_tags_from_content(content: str, filepath: Path) -> list[str]:
@@ -261,6 +285,7 @@ async def lifespan(app: FastAPI):
     global _address_index, _address_completer, _address_pipeline
     global _zip_database, _address_vector_index, _orchestrator
     global _enforcer, _download_manager, _index_state, _progress_tracker, _redis_stack
+    global _federation, _email_auth, _ingestion_pipeline
 
     logger.info("=" * 50)
     logger.info("ICDA Startup")
@@ -336,6 +361,16 @@ async def lifespan(app: FastAPI):
         logger.info("Customer indexing skipped (OpenSearch or embeddings not available)")
 
     _sessions = SessionManager(_cache)
+
+    # Initialize Email Authentication (simple email-based auth with Redis sessions)
+    _email_auth = init_email_auth(EmailAuthConfig(), _cache)
+    if _email_auth.available:
+        logger.info(f"Email Auth: enabled (session TTL={_email_auth.config.session_ttl}s)")
+    else:
+        if not _email_auth.config.enabled:
+            logger.info("Email Auth: disabled (set AUTH_ENABLED=true to enable)")
+        else:
+            logger.info("Email Auth: disabled (requires Redis)")
 
     # Initialize download token manager
     _download_manager = DownloadTokenManager(_cache)
@@ -520,6 +555,49 @@ async def lifespan(app: FastAPI):
 
     _knowledge_watcher = KnowledgeWatcher(KNOWLEDGE_DIR, index_file_callback)
     _knowledge_watcher.start()
+
+    # Initialize Index Federation (unified federated search across all indexes)
+    if cfg.enable_federation and _vector_index.available:
+        logger.info("Initializing Index Federation...")
+        _federation = IndexFederation(
+            opensearch_client=_vector_index.client,
+            embedder=_embedder,
+            config=cfg.get_index_config()  # Uses configured index names
+        )
+        # Ensure all federation indexes exist
+        try:
+            index_results = await asyncio.wait_for(
+                _federation.ensure_all_indexes(),
+                timeout=15.0
+            )
+            enabled_indexes = [k for k, v in index_results.items() if v]
+            logger.info(f"Index Federation: {len(enabled_indexes)}/4 indexes ready ({', '.join(enabled_indexes)})")
+        except asyncio.TimeoutError:
+            logger.warning("Index Federation: index creation timed out, federation may be limited")
+        except Exception as e:
+            logger.warning(f"Index Federation: failed to ensure indexes - {e}")
+    else:
+        logger.info(f"Index Federation: disabled (enable_federation={cfg.enable_federation}, opensearch={_vector_index.available})")
+
+    # Initialize Address Data Ingestion Pipeline (optional)
+    # Supports: NCOA batch files, REST webhooks, file drops
+    # Features: AI schema mapping, multi-provider embeddings, 5-stage quality enforcers
+    try:
+        ingestion_config = IngestionConfig()
+        _ingestion_pipeline = IngestionPipeline(
+            config=ingestion_config,
+            address_index=_address_index,
+            vector_index=_address_vector_index,
+            embedding_client=_embedder,
+            nova_client=None,  # Will be set after NovaClient is created
+        )
+        await _ingestion_pipeline.initialize()
+        logger.info("Ingestion Pipeline: initialized")
+        logger.info(f"  - Schema mapping: {'AI-enabled' if ingestion_config.enable_ai_schema_mapping else 'disabled'}")
+        logger.info(f"  - Quality enforcers: {'enabled' if ingestion_config.enforcers.enabled else 'disabled'}")
+    except Exception as e:
+        logger.warning(f"Ingestion Pipeline: initialization failed - {e}")
+        _ingestion_pipeline = None
 
     # Initialize LLM Enforcer FIRST (optional, graceful degradation if no API key)
     # This must be done before NovaClient so it can be passed to the orchestrator
@@ -761,6 +839,290 @@ async def paginate_results(token: str, offset: int = 0, limit: int = 15):
     }
 
 
+# =============================================================================
+# AUTH ENDPOINTS - Simple email-based authentication
+# =============================================================================
+
+class LoginRequest(BaseModel):
+    """Email login request."""
+    email: str = Field(..., description="User's email address")
+
+
+@app.post("/api/auth/login")
+async def auth_login(request: LoginRequest):
+    """
+    Login or register user by email.
+
+    Returns a session token that should be included in subsequent requests
+    via X-Session-ID header or Authorization: Bearer <token>.
+    """
+    auth = get_email_auth()
+
+    if not auth.config.enabled:
+        return {
+            "success": False,
+            "error": "Authentication is disabled. Set AUTH_ENABLED=true to enable.",
+        }
+
+    if not auth.available:
+        return {
+            "success": False,
+            "error": "Authentication service unavailable (requires Redis)",
+        }
+
+    user, error = await auth.login(request.email)
+
+    if not user:
+        return {
+            "success": False,
+            "error": error,
+        }
+
+    return {
+        "success": True,
+        "user": {
+            "email": user.email,
+            "username": user.username,
+            "id": user.id,
+        },
+        "session_id": user.session_id,
+        "expires_in": auth.config.session_ttl,
+    }
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request):
+    """
+    Logout user by invalidating session.
+
+    Session ID can be provided via:
+    - X-Session-ID header
+    - Authorization: Bearer <session_id> header
+    """
+    auth = get_email_auth()
+
+    if not auth.available:
+        return {"success": False, "error": "Authentication service unavailable"}
+
+    # Get session ID from headers
+    session_id = request.headers.get("X-Session-ID")
+    if not session_id:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            session_id = auth_header[7:]
+
+    if not session_id:
+        return {"success": False, "error": "No session ID provided"}
+
+    success = await auth.logout(session_id)
+    return {"success": success}
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    """
+    Get current authenticated user info.
+
+    Returns user details if authenticated, or anonymous status if not.
+    """
+    auth = get_email_auth()
+
+    if not auth.config.enabled:
+        return {
+            "authenticated": False,
+            "auth_enabled": False,
+            "user": None,
+        }
+
+    if not auth.available:
+        return {
+            "authenticated": False,
+            "auth_enabled": True,
+            "auth_available": False,
+            "user": None,
+        }
+
+    # Try to get session from headers
+    session_id = request.headers.get("X-Session-ID")
+    if not session_id:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            session_id = auth_header[7:]
+
+    if not session_id:
+        return {
+            "authenticated": False,
+            "auth_enabled": True,
+            "auth_available": True,
+            "user": None,
+        }
+
+    user = await auth.validate_session(session_id)
+
+    if not user:
+        return {
+            "authenticated": False,
+            "auth_enabled": True,
+            "auth_available": True,
+            "user": None,
+            "error": "Invalid or expired session",
+        }
+
+    return {
+        "authenticated": True,
+        "auth_enabled": True,
+        "auth_available": True,
+        "user": {
+            "email": user.email,
+            "username": user.username,
+            "id": user.id,
+            "created_at": user.created_at.isoformat(),
+            "last_active": user.last_active.isoformat(),
+        },
+    }
+
+
+@app.get("/api/auth/status")
+async def auth_status():
+    """Get authentication system status."""
+    auth = get_email_auth()
+
+    return {
+        "enabled": auth.config.enabled,
+        "available": auth.available,
+        "session_ttl": auth.config.session_ttl,
+        "allow_anonymous": auth.config.allow_anonymous,
+        "require_verification": auth.config.require_verification,
+        "allowed_domains": list(auth.config.get_allowed_domains()) if auth.config.allowed_domains else None,
+    }
+
+
+# =============================================================================
+# SESSION ENDPOINTS - Conversation session management
+# =============================================================================
+
+@app.post("/api/session/new")
+async def session_new(request: Request):
+    """
+    Create a new conversation session.
+
+    If user is authenticated (via X-Session-ID or Authorization header),
+    the session will be linked to their user account.
+    """
+    import uuid
+
+    # Check for authenticated user
+    auth = get_email_auth()
+    user = None
+    if auth.available:
+        session_id = request.headers.get("X-Session-ID")
+        if not session_id:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                session_id = auth_header[7:]
+        if session_id:
+            user = await auth.validate_session(session_id)
+
+    # Create new session
+    new_session_id = str(uuid.uuid4())
+
+    if user:
+        session = await _sessions.get_or_create_for_user(
+            new_session_id,
+            user_id=user.id,
+            user_email=user.email,
+        )
+    else:
+        session = await _sessions.get(new_session_id)
+
+    await _sessions.save(session)
+
+    return {
+        "session_id": session.session_id,
+        "user_id": session.user_id,
+        "created_at": session.created_at,
+    }
+
+
+@app.delete("/api/session/{session_id}")
+async def session_delete(session_id: str):
+    """Delete a specific conversation session."""
+    await _sessions.delete(session_id)
+    return {"success": True, "session_id": session_id}
+
+
+@app.delete("/api/sessions")
+async def sessions_clear(request: Request):
+    """
+    Clear all sessions.
+
+    If user is authenticated, only their sessions are cleared.
+    Otherwise, clears all sessions (admin operation).
+    """
+    auth = get_email_auth()
+    user = None
+
+    if auth.available:
+        session_id = request.headers.get("X-Session-ID")
+        if not session_id:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                session_id = auth_header[7:]
+        if session_id:
+            user = await auth.validate_session(session_id)
+
+    if user:
+        # Clear only this user's sessions
+        count = await _sessions.delete_user_sessions(user.id)
+        return {"status": "cleared", "count": count, "scope": "user"}
+    else:
+        # Clear all sessions (anonymous/admin)
+        count = await _sessions.clear_all()
+        return {"status": "cleared", "count": count, "scope": "all"}
+
+
+@app.get("/api/sessions")
+async def sessions_list(request: Request):
+    """
+    List all sessions for the authenticated user.
+
+    Returns empty list if not authenticated.
+    """
+    auth = get_email_auth()
+
+    if not auth.available:
+        return {"sessions": [], "error": "Authentication not available"}
+
+    session_id = request.headers.get("X-Session-ID")
+    if not session_id:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            session_id = auth_header[7:]
+
+    if not session_id:
+        return {"sessions": [], "error": "Not authenticated"}
+
+    user = await auth.validate_session(session_id)
+    if not user:
+        return {"sessions": [], "error": "Invalid session"}
+
+    sessions = await _sessions.get_user_sessions(user.id)
+
+    return {
+        "sessions": [
+            {
+                "session_id": s.session_id,
+                "message_count": len(s.messages),
+                "created_at": s.created_at,
+                "updated_at": s.updated_at,
+                "preview": s.messages[0].content[:100] if s.messages else None,
+            }
+            for s in sessions
+        ],
+        "count": len(sessions),
+    }
+
+
 @app.get("/api/health")
 async def health():
     """Health check with mode status - flat structure for frontend compatibility.
@@ -803,6 +1165,244 @@ async def cache_stats():
 async def clear_cache():
     await _cache.clear()
     return {"status": "cleared"}
+
+
+# =============================================================================
+# FRONTEND CONVENIENCE ENDPOINTS - Aliases for frontend API compatibility
+# =============================================================================
+
+class AddressVerificationRequest(BaseModel):
+    """Request for batch address verification."""
+    addresses: list[dict] = Field(..., description="List of address objects with street, city, state, zip")
+    include_corrections: bool = Field(default=True, description="Include Nova corrections for failed matches")
+
+
+@app.post("/api/verify-addresses")
+async def verify_addresses(request: AddressVerificationRequest):
+    """
+    Verify a batch of addresses.
+
+    Alias for /api/validate/batch for frontend compatibility.
+    """
+    # Forward to the validation router's batch endpoint
+    if not _address_pipeline:
+        return {"success": False, "error": "Address verification not initialized"}
+
+    results = []
+    for addr in request.addresses:
+        try:
+            result = await _address_pipeline.verify(
+                street=addr.get("street", ""),
+                city=addr.get("city"),
+                state=addr.get("state"),
+                zip_code=addr.get("zip") or addr.get("zip_code"),
+            )
+            results.append({
+                "input": addr,
+                "match": result.get("match"),
+                "confidence": result.get("confidence", 0),
+                "status": "verified" if result.get("match") else "not_found",
+            })
+        except Exception as e:
+            results.append({
+                "input": addr,
+                "status": "error",
+                "error": str(e),
+            })
+
+    verified_count = sum(1 for r in results if r.get("status") == "verified")
+    return {
+        "success": True,
+        "total": len(results),
+        "verified": verified_count,
+        "failed": len(results) - verified_count,
+        "results": results,
+    }
+
+
+@app.post("/api/upload-addresses")
+async def upload_addresses(
+    file: UploadFile = File(...),
+    save_to_pipeline: bool = Form(default=False),
+):
+    """
+    Upload a file containing addresses for verification.
+
+    Supports CSV, Excel, and text files with one address per line.
+    """
+    import csv
+    from io import StringIO
+
+    # Read file content
+    content = await file.read()
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            text = content.decode("latin-1")
+        except Exception:
+            return {"success": False, "error": "Unable to decode file (unsupported encoding)"}
+
+    # Parse addresses based on file type
+    addresses = []
+    filename = file.filename.lower() if file.filename else ""
+
+    if filename.endswith(".csv"):
+        # Parse CSV
+        reader = csv.DictReader(StringIO(text))
+        for row in reader:
+            # Try to find address fields
+            addr = {}
+            for key in ["street", "address", "street_address", "address1"]:
+                if key in row:
+                    addr["street"] = row[key]
+                    break
+            for key in ["city"]:
+                if key in row:
+                    addr["city"] = row[key]
+            for key in ["state", "st"]:
+                if key in row:
+                    addr["state"] = row[key]
+            for key in ["zip", "zip_code", "zipcode", "postal"]:
+                if key in row:
+                    addr["zip"] = row[key]
+
+            if addr.get("street"):
+                addresses.append(addr)
+    else:
+        # Plain text - one address per line
+        for line in text.strip().split("\n"):
+            line = line.strip()
+            if line:
+                addresses.append({"street": line})
+
+    if not addresses:
+        return {"success": False, "error": "No valid addresses found in file"}
+
+    # Verify addresses
+    results = []
+    for addr in addresses:
+        try:
+            result = await _address_pipeline.verify(
+                street=addr.get("street", ""),
+                city=addr.get("city"),
+                state=addr.get("state"),
+                zip_code=addr.get("zip"),
+            )
+            results.append({
+                "input": addr,
+                "match": result.get("match"),
+                "confidence": result.get("confidence", 0),
+                "status": "verified" if result.get("match") else "not_found",
+            })
+        except Exception as e:
+            results.append({
+                "input": addr,
+                "status": "error",
+                "error": str(e),
+            })
+
+    verified_count = sum(1 for r in results if r.get("status") == "verified")
+    return {
+        "success": True,
+        "filename": file.filename,
+        "total": len(results),
+        "verified": verified_count,
+        "failed": len(results) - verified_count,
+        "results": results,
+    }
+
+
+@app.post("/api/query-with-file")
+async def query_with_file(
+    query: str = Form(...),
+    file: UploadFile = File(...),
+    session_id: Optional[str] = Form(None),
+    bypass_cache: bool = Form(False),
+    pii: bool = Form(True),
+    financial: bool = Form(True),
+    credentials: bool = Form(True),
+    offtopic: bool = Form(True),
+):
+    """
+    Query with an attached file for context.
+
+    The file content is extracted and used as additional context for the query.
+    """
+    # Read file content
+    content = await file.read()
+    try:
+        file_text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            file_text = content.decode("latin-1")
+        except Exception:
+            return {"success": False, "error": "Unable to decode file (unsupported encoding)"}
+
+    # Truncate if too long
+    max_context_len = 8000  # Keep context reasonable
+    if len(file_text) > max_context_len:
+        file_text = file_text[:max_context_len] + f"\n\n[... truncated {len(file_text) - max_context_len} characters ...]"
+
+    # Construct enhanced query with file context
+    enhanced_query = f"""User query: {query}
+
+File context ({file.filename}):
+---
+{file_text}
+---
+
+Please answer the query considering the file content above."""
+
+    # Route through main query endpoint
+    from pydantic import BaseModel as PydanticBaseModel
+
+    class InternalQueryRequest(PydanticBaseModel):
+        query: str
+        session_id: Optional[str] = None
+        bypass_cache: bool = False
+        guardrails: Optional[dict] = None
+
+    internal_request = InternalQueryRequest(
+        query=enhanced_query,
+        session_id=session_id,
+        bypass_cache=bypass_cache,
+        guardrails={
+            "pii": pii,
+            "financial": financial,
+            "credentials": credentials,
+            "offtopic": offtopic,
+        },
+    )
+
+    # Get session
+    session = await _sessions.get(session_id)
+
+    # Process query through router
+    result = await _router.route(
+        internal_request.query,
+        session.get_history() if session else [],
+        {
+            "pii": pii,
+            "financial": financial,
+            "credentials": credentials,
+            "offtopic": offtopic,
+        },
+        bypass_cache=bypass_cache,
+    )
+
+    # Save to session
+    if session:
+        session.add_message("user", query)  # Original query, not enhanced
+        if result.get("response"):
+            session.add_message("assistant", result["response"])
+        await _sessions.save(session)
+
+    return {
+        **result,
+        "session_id": session.session_id if session else None,
+        "file_processed": file.filename,
+    }
 
 
 @app.get("/api/autocomplete/{field}")
@@ -2250,6 +2850,397 @@ async def admin_validate_index():
             "coverage_gaps": report.coverage_gaps,
             "recommendations": report.recommendations
         }
+    }
+
+
+# ==================== Index Federation ====================
+
+class FederatedSearchRequest(BaseModel):
+    """Request model for federated search."""
+    query: str = Field(..., description="Search query")
+    indexes: Optional[list[str]] = Field(None, description="Specific indexes to search (null for auto-route)")
+    k: int = Field(default=10, ge=1, le=100, description="Results per index")
+    deduplicate: bool = Field(default=True, description="Deduplicate results across indexes")
+
+
+@app.post("/api/federated/search")
+async def federated_search(req: FederatedSearchRequest):
+    """
+    Execute a federated search across multiple indexes.
+
+    Auto-routes query to relevant indexes (code, knowledge, customers) based on
+    semantic routing from the master index. Returns merged, deduplicated results
+    with source attribution.
+    """
+    if not _federation:
+        return {
+            "success": False,
+            "error": "Index Federation not enabled. Set ENABLE_FEDERATION=true in .env"
+        }
+
+    import time
+    start = time.time()
+
+    try:
+        result = await _federation.search(
+            query=req.query,
+            indexes=req.indexes,
+            k=req.k,
+            deduplicate=req.deduplicate,
+        )
+
+        # Convert results to serializable format
+        hits = []
+        for r in result.results:
+            hits.append({
+                "doc_id": r.doc_id,
+                "chunk_id": r.chunk_id,
+                "text": r.text[:500] if r.text else "",  # Truncate for response
+                "score": round(r.score, 4),
+                "source_index": r.source_index,
+                "is_deduplicated": r.is_deduplicated,
+                "alternate_sources": r.alternate_sources,
+            })
+
+        return {
+            "success": True,
+            "results": hits,
+            "total": result.total_hits,
+            "searched_indexes": result.searched_indexes,
+            "routing_scores": {k: round(v, 4) for k, v in result.routing_scores.items()},
+            "deduplicated_count": result.deduplicated_count,
+            "processing_ms": result.processing_time_ms,
+            "query_time_ms": round((time.time() - start) * 1000, 2),
+        }
+    except Exception as e:
+        logger.error(f"Federated search failed: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.get("/api/federated/search/code")
+async def federated_search_code(
+    q: str,
+    language: Optional[str] = None,
+    limit: int = 10
+):
+    """Search code index only."""
+    if not _federation:
+        return {"success": False, "error": "Index Federation not enabled"}
+
+    try:
+        results = await _federation.search_code(q, language=language, k=limit)
+        hits = [
+            {
+                "doc_id": r.doc_id,
+                "chunk_id": r.chunk_id,
+                "text": r.text[:500] if r.text else "",
+                "score": round(r.score, 4),
+                "filename": r.metadata.get("filename", ""),
+                "language": r.metadata.get("language", ""),
+                "symbols": r.metadata.get("symbols", []),
+            }
+            for r in results
+        ]
+        return {"success": True, "results": hits, "total": len(hits)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/federated/search/knowledge")
+async def federated_search_knowledge(
+    q: str,
+    category: Optional[str] = None,
+    tags: Optional[str] = None,
+    limit: int = 10
+):
+    """Search knowledge index only."""
+    if not _federation:
+        return {"success": False, "error": "Index Federation not enabled"}
+
+    try:
+        tag_list = tags.split(",") if tags else None
+        results = await _federation.search_knowledge(q, category=category, tags=tag_list, k=limit)
+        hits = [
+            {
+                "doc_id": r.doc_id,
+                "chunk_id": r.chunk_id,
+                "text": r.text[:500] if r.text else "",
+                "score": round(r.score, 4),
+                "filename": r.metadata.get("filename", ""),
+                "category": r.metadata.get("category", ""),
+                "tags": r.metadata.get("tags", []),
+            }
+            for r in results
+        ]
+        return {"success": True, "results": hits, "total": len(hits)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/federated/search/customers")
+async def federated_search_customers(
+    q: str,
+    state: Optional[str] = None,
+    limit: int = 10
+):
+    """Search customers index only."""
+    if not _federation:
+        return {"success": False, "error": "Index Federation not enabled"}
+
+    try:
+        results = await _federation.search_customers(q, state=state, k=limit)
+        hits = [
+            {
+                "crid": r.metadata.get("crid", r.doc_id),
+                "name": r.metadata.get("name", ""),
+                "address": r.metadata.get("address", ""),
+                "city": r.metadata.get("city", ""),
+                "state": r.metadata.get("state", ""),
+                "zip": r.metadata.get("zip", ""),
+                "score": round(r.score, 4),
+            }
+            for r in results
+        ]
+        return {"success": True, "results": hits, "total": len(hits)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/admin/federation/stats")
+async def admin_federation_stats():
+    """Get statistics for all federated indexes."""
+    if not cfg.admin_enabled:
+        return {"success": False, "error": "Admin API disabled"}
+
+    if not _federation:
+        return {
+            "success": False,
+            "error": "Index Federation not enabled. Set ENABLE_FEDERATION=true in .env"
+        }
+
+    try:
+        stats = await _federation.get_all_stats()
+        return {
+            "success": True,
+            "federation_enabled": True,
+            "stats": stats
+        }
+    except Exception as e:
+        logger.error(f"Failed to get federation stats: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/admin/federation/sync")
+async def admin_federation_sync_document(
+    doc_id: str,
+    source_index: str,
+    title: str,
+    summary: str,
+    chunk_count: int = 0,
+    tags: list[str] = None,
+    category: str = "general"
+):
+    """Manually sync a document to the master index."""
+    if not cfg.admin_enabled:
+        return {"success": False, "error": "Admin API disabled"}
+
+    if not _federation:
+        return {"success": False, "error": "Index Federation not enabled"}
+
+    try:
+        success = await _federation.sync_to_master(
+            doc_id=doc_id,
+            source_index=source_index,
+            title=title,
+            summary=summary,
+            chunk_count=chunk_count,
+            tags=tags or [],
+            category=category,
+        )
+        return {"success": success}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# =============================================================================
+# INGESTION API ENDPOINTS - Address data ingestion pipeline
+# =============================================================================
+
+class IngestionFileRequest(BaseModel):
+    """Request to ingest addresses from a file."""
+    file_path: str = Field(..., description="Path to address data file (JSON/CSV)")
+    embedding_path: Optional[str] = Field(None, description="Optional path to pre-computed embeddings")
+    file_format: str = Field("json", description="File format: 'json' or 'csv'")
+
+
+@app.get("/api/ingestion/status")
+async def ingestion_status():
+    """Get ingestion pipeline status and statistics."""
+    if not _ingestion_pipeline:
+        return {
+            "available": False,
+            "error": "Ingestion pipeline not initialized",
+        }
+
+    return {
+        "available": True,
+        "initialized": _ingestion_pipeline._initialized,
+        "stats": _ingestion_pipeline._stats,
+        "config": {
+            "enable_ai_schema_mapping": _ingestion_pipeline._config.enable_ai_schema_mapping,
+            "enforcers_enabled": _ingestion_pipeline._config.enforcers.enabled,
+            "max_concurrent": _ingestion_pipeline._config.max_concurrent,
+            "batch_size": _ingestion_pipeline._config.batch_size,
+        },
+    }
+
+
+@app.post("/api/ingestion/file")
+async def ingest_file(request: IngestionFileRequest):
+    """
+    Ingest address data from a file.
+
+    Supports JSON and CSV formats. Optionally accepts pre-computed embeddings.
+    """
+    if not _ingestion_pipeline:
+        return {"success": False, "error": "Ingestion pipeline not initialized"}
+
+    try:
+        result: IngestionBatchResult = await _ingestion_pipeline.ingest_file(
+            file_path=request.file_path,
+            embedding_path=request.embedding_path,
+            file_format=request.file_format,
+        )
+
+        return {
+            "success": True,
+            "summary": result.summary.to_dict() if result.summary else None,
+            "batch_id": result.batch_id,
+            "source": result.source,
+            "total_records": len(result.records),
+            "approved": sum(1 for r in result.records if r.status.value == "approved"),
+            "rejected": sum(1 for r in result.records if r.status.value == "rejected"),
+        }
+    except FileNotFoundError:
+        return {"success": False, "error": f"File not found: {request.file_path}"}
+    except Exception as e:
+        logger.error(f"Ingestion failed: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/ingestion/upload")
+async def ingest_upload(
+    file: UploadFile = File(...),
+    file_format: str = Form("auto"),
+):
+    """
+    Upload and ingest an address file directly.
+
+    The file is saved temporarily and processed through the ingestion pipeline.
+    """
+    import tempfile
+    import os
+
+    if not _ingestion_pipeline:
+        return {"success": False, "error": "Ingestion pipeline not initialized"}
+
+    # Determine format from filename if auto
+    if file_format == "auto":
+        filename = file.filename.lower() if file.filename else ""
+        if filename.endswith(".csv"):
+            file_format = "csv"
+        elif filename.endswith(".json"):
+            file_format = "json"
+        else:
+            return {"success": False, "error": "Cannot determine file format. Specify 'json' or 'csv'."}
+
+    # Save to temp file
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False, suffix=f".{file_format}") as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        # Process through pipeline
+        result = await _ingestion_pipeline.ingest_file(
+            file_path=tmp_path,
+            file_format=file_format,
+        )
+
+        # Clean up
+        os.unlink(tmp_path)
+
+        return {
+            "success": True,
+            "filename": file.filename,
+            "summary": result.summary.to_dict() if result.summary else None,
+            "batch_id": result.batch_id,
+            "total_records": len(result.records),
+            "approved": sum(1 for r in result.records if r.status.value == "approved"),
+            "rejected": sum(1 for r in result.records if r.status.value == "rejected"),
+        }
+    except Exception as e:
+        # Clean up on error
+        if 'tmp_path' in locals():
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+        logger.error(f"Ingestion upload failed: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/ingestion/progress")
+async def ingestion_progress():
+    """Get real-time ingestion progress."""
+    if not _ingestion_pipeline or not _ingestion_pipeline._progress_tracker:
+        return {
+            "available": False,
+            "current_batch": None,
+            "progress": 0,
+        }
+
+    tracker = _ingestion_pipeline._progress_tracker
+    return {
+        "available": True,
+        "current_batch": tracker.current_batch_id,
+        "progress": tracker.progress_percent,
+        "records_processed": tracker.records_processed,
+        "records_total": tracker.records_total,
+        "current_stage": tracker.current_stage,
+        "errors": tracker.error_count,
+    }
+
+
+@app.get("/api/ingestion/config")
+async def ingestion_config():
+    """Get ingestion pipeline configuration."""
+    if not _ingestion_pipeline:
+        return {"available": False}
+
+    config = _ingestion_pipeline._config
+    return {
+        "available": True,
+        "enable_ai_schema_mapping": config.enable_ai_schema_mapping,
+        "max_concurrent": config.max_concurrent,
+        "batch_size": config.batch_size,
+        "progress_interval": config.progress_interval,
+        "schema_cache_path": str(config.schema_cache_path) if config.schema_cache_path else None,
+        "enforcers": {
+            "enabled": config.enforcers.enabled,
+            "fail_fast": config.enforcers.fail_fast,
+            "required_fields": config.enforcers.required_fields,
+            "similarity_threshold": config.enforcers.similarity_threshold,
+            "min_quality_score": config.enforcers.min_quality_score,
+        },
+        "embeddings": {
+            "target_dimension": config.embeddings.target_dimension,
+            "enable_normalization": config.embeddings.enable_normalization,
+            "fallback_order": config.embeddings.fallback_order,
+        },
     }
 
 
