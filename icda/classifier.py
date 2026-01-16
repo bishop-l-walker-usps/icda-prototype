@@ -21,6 +21,7 @@ class QueryIntent(Enum):
     ANALYSIS = "analysis"       # Trends, patterns, insights
     COMPARISON = "comparison"   # Compare customers/states
     RECOMMENDATION = "recommendation"  # Suggestions based on data
+    CONVERSATIONAL = "conversational"  # Greetings, chitchat, personal info
 
 
 @dataclass(slots=True)

@@ -1,4 +1,4 @@
-﻿"""Query Orchestrator - 11-Agent Query Processing Pipeline.
+"""Query Orchestrator - 11-Agent Query Processing Pipeline.
 
 Coordinates the full query processing pipeline:
 1. IntentAgent -> Classify query intent
@@ -891,105 +891,6 @@ class QueryOrchestrator:
     # FAST PATH METHODS - Skip 12-agent pipeline for simple queries
     # =========================================================================
 
-    async def _handle_conversational(
-        self,
-        query: str,
-        intent: IntentResult,
-        session_id: str | None,
-        trace: PipelineTrace | None,
-    ) -> QueryResult | None:
-        """Handle conversational queries without RAG/search pipeline."""
-        import time as time_module
-        start_time = time_module.time()
-        q = query.lower().strip()
-
-        response = self._generate_conversational_response(q, query)
-        if not response:
-            return None
-
-        total_ms = int((time_module.time() - start_time) * 1000)
-
-        if trace:
-            trace.add_stage(
-                agent="conversational",
-                output={"response_type": "direct", "query": query},
-                time_ms=total_ms,
-                success=True,
-                confidence=0.95,
-            )
-            trace.total_time_ms = total_ms
-            trace.success = True
-
-        logger.info(f"Conversational path completed in {total_ms}ms")
-
-        return QueryResult(
-            success=True,
-            response=response,
-            route="conversational",
-            tools_used=[],
-            quality_score=0.95,
-            latency_ms=total_ms,
-            trace=trace,
-            metadata={
-                "intent": intent.to_dict(),
-                "conversational": True,
-                "agents_skipped": ["memory", "context", "parser", "resolver", "search", "knowledge", "nova", "enforcer", "personality", "suggestions"],
-            },
-            results=[],
-        )
-
-    def _generate_conversational_response(self, q: str, original_query: str) -> str | None:
-        """Generate a direct response for conversational queries."""
-        q = q.rstrip("!.,?")
-
-        if q in ("hi", "hello", "hey", "yo", "sup", "howdy", "greetings"):
-            return "Hello! I'm ICDA, your customer data assistant. How can I help you today?"
-
-        if q in ("good morning", "good afternoon", "good evening", "good night"):
-            greeting = q.replace("good ", "").capitalize()
-            return f"{greeting}! How can I assist you with customer data today?"
-
-        if q.startswith("my name is "):
-            name = original_query[len("my name is "):].strip().rstrip("!.,?").title()
-            return f"Nice to meet you, {name}! I'm ICDA, your customer data assistant. I can help you search customers, verify addresses, look up records, and more. What would you like to do?"
-
-        if q.startswith("i am ") or q.startswith("im "):
-            parts = original_query.split(" ", 2)
-            name = parts[-1].strip().rstrip("!.,?").title() if len(parts) > 2 else ""
-            if name:
-                return f"Hello {name}! How can I help you with customer data today?"
-            return "Hello! How can I help you with customer data today?"
-
-        if q in ("thanks", "thank you", "thx", "ty"):
-            return "You're welcome! Let me know if you need anything else."
-
-        if q in ("yes", "yep", "yeah", "sure", "ok", "okay"):
-            return "Great! What would you like me to help you with?"
-
-        if q in ("no", "nope", "nah"):
-            return "Okay, no problem. Let me know if you need help with something else."
-
-        if q in ("bye", "goodbye", "see you", "later", "cya"):
-            return "Goodbye! Feel free to come back anytime you need help with customer data."
-
-        if q.startswith("how are you"):
-            return "I'm doing well, thank you for asking! How can I help you with customer data today?"
-
-        if q.startswith("who are you"):
-            return "I'm ICDA (Intelligent Customer Data Access), your AI-powered customer data assistant. I can search customers, verify addresses, provide statistics, and answer questions about your customer database."
-
-        if q.startswith("what can you do") or q == "help":
-            return """I'm ICDA, your customer data assistant. Here's what I can help with:
-
-• **Search customers** - Find customers by name, city, state, or other criteria
-• **Look up CRIDs** - Get details for a specific customer record
-• **Verify addresses** - Validate and normalize address data
-• **Statistics** - Get counts and breakdowns by state, status, etc.
-• **Move history** - Find customers who moved from one state to another
-
-Try: "Find customers in Nevada" or "Look up CRID-12345\""""
-
-        return None
     async def _should_use_fast_path(self, intent: IntentResult, query: str) -> bool:
         """Determine if query can use fast path (skip full pipeline).
 

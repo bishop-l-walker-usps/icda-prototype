@@ -1,4 +1,4 @@
-﻿"""Intent Agent - Classifies query intent and determines domains.
+"""Intent Agent - Classifies query intent and determines domains.
 
 This agent is the first in the pipeline. It analyzes the user's query to:
 1. Classify the primary intent (LOOKUP, SEARCH, STATS, etc.)
@@ -279,16 +279,6 @@ class IntentAgent:
 
     def _detect_intent(self, query: str, signals: dict) -> tuple[QueryIntent, float]:
         """Detect primary query intent using pattern matching."""
-        # CONVERSATIONAL CHECK FIRST - avoid RAG for simple chat
-        if self._match_patterns(query, self.CONVERSATIONAL_PATTERNS):
-            signals["patterns_matched"].append("conversational")
-            return QueryIntent.CONVERSATIONAL, 0.95
-        
-        # Short queries without data keywords = likely conversational
-        if len(query.split()) < 5 and not self._has_data_keywords(query):
-            signals["patterns_matched"].append("conversational_short")
-            return QueryIntent.CONVERSATIONAL, 0.8
-
         if self._match_patterns(query, self.LOOKUP_PATTERNS):
             signals["patterns_matched"].append("lookup")
             if re.search(r"crid[-\s]?\d+", query):
@@ -506,16 +496,6 @@ class IntentAgent:
         if len(query.split()) > 20:
             confidence *= 0.85
         return round(confidence, 3)
-
-    def _has_data_keywords(self, query: str) -> bool:
-        """Check if query contains customer/data-related keywords."""
-        data_keywords = (
-            "customer", "crid", "state", "city", "address", "moved",
-            "search", "find", "list", "show", "count", "how many",
-            "stats", "nevada", "california", "texas", "active", "inactive"
-        )
-        q = query.lower()
-        return any(kw in q for kw in data_keywords)
 
     def _match_patterns(self, text: str, patterns: tuple) -> bool:
         """Check if any pattern matches the text."""
