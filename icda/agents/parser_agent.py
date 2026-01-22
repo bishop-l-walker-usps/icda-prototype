@@ -19,6 +19,7 @@ import re
 from difflib import get_close_matches
 from typing import Any
 
+from icda.classifier import QueryIntent
 from .models import IntentResult, QueryContext, ParsedQuery
 from .city_state_validator import CityStateValidator
 from .query_rewriter import QueryRewriter, RewriteResult
@@ -349,6 +350,10 @@ class ParserAgent:
         # Check if follow-up
         is_follow_up = context.is_follow_up
 
+        # Assess query scope (in_scope, out_of_scope, conversational)
+        query_scope = self._assess_query_scope(query, intent, entities, filters)
+        resolution_notes.append(f"Query scope: {query_scope['assessment']}")
+
         return ParsedQuery(
             original_query=query,  # Keep original for reference
             normalized_query=normalized,
@@ -359,6 +364,7 @@ class ParserAgent:
             limit=limit,
             is_follow_up=is_follow_up,
             resolution_notes=resolution_notes,
+            query_scope=query_scope,
         )
 
     def _normalize_query(self, query: str, notes: list[str]) -> str:
@@ -765,3 +771,69 @@ class ParserAgent:
             return "name_asc"
 
         return None
+
+    def _assess_query_scope(
+        self,
+        query: str,
+        intent: IntentResult,
+        entities: dict[str, list[str]],
+        filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Assess if the query is within scope of the customer data system.
+
+        Args:
+            query: Original user query.
+            intent: Intent classification result.
+            entities: Extracted entities.
+            filters: Extracted filters.
+
+        Returns:
+            Dict with assessment, confidence, and reason.
+        """
+        # Check if intent was classified as OUT_OF_SCOPE
+        if intent.primary_intent == QueryIntent.OUT_OF_SCOPE:
+            return {
+                "assessment": "out_of_scope",
+                "confidence": intent.confidence,
+                "reason": "Query classified as outside customer data domain",
+            }
+
+        # Check if intent is conversational
+        if intent.primary_intent == QueryIntent.CONVERSATIONAL:
+            return {
+                "assessment": "conversational",
+                "confidence": intent.confidence,
+                "reason": "Conversational query - no data lookup needed",
+            }
+
+        # Check if query has any customer data indicators
+        has_entities = any(
+            entities.get(key) for key in ["crids", "states", "cities", "zips"]
+        )
+        has_filters = bool(filters)
+        has_data_keywords = self._has_data_keywords(query)
+
+        if has_entities or has_filters or has_data_keywords:
+            return {
+                "assessment": "in_scope",
+                "confidence": intent.confidence,
+                "reason": "Query contains customer data indicators",
+            }
+
+        # Query has no clear customer data indicators - might be ambiguous
+        return {
+            "assessment": "in_scope",
+            "confidence": max(0.5, intent.confidence - 0.2),
+            "reason": "Query may be ambiguous but defaulting to in-scope",
+        }
+
+    def _has_data_keywords(self, query: str) -> bool:
+        """Check if query contains customer/data-related keywords."""
+        data_keywords = (
+            "customer", "crid", "state", "city", "address", "moved",
+            "search", "find", "list", "show", "count", "how many",
+            "stats", "nevada", "california", "texas", "active", "inactive",
+            "zip", "status", "movers", "relocated"
+        )
+        q = query.lower()
+        return any(kw in q for kw in data_keywords)

@@ -22,6 +22,7 @@ class QueryIntent(Enum):
     COMPARISON = "comparison"   # Compare customers/states
     RECOMMENDATION = "recommendation"  # Suggestions based on data
     CONVERSATIONAL = "conversational"  # Greetings, chitchat, personal info
+    OUT_OF_SCOPE = "out_of_scope"  # Questions outside customer data domain
 
 
 @dataclass(slots=True)

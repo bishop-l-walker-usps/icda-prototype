@@ -264,10 +264,19 @@ class QueryOrchestrator:
             )
 
             # =========================================================================
+            # OUT OF SCOPE: Early exit for questions outside customer data domain
+            # This prevents the AI from hallucinating answers about weather, sports, etc.
+            # =========================================================================
+            from icda.classifier import QueryComplexity, QueryIntent
+
+            if intent.primary_intent == QueryIntent.OUT_OF_SCOPE:
+                logger.info(f"OUT_OF_SCOPE: Early exit for query: '{query[:50]}...'")
+                return await self._handle_out_of_scope(query, intent, trace, start_time)
+
+            # =========================================================================
             # FAST PATH: Skip 12-agent pipeline for simple searches
             # This cuts latency from ~18s to ~500ms for queries like "find Chris"
             # =========================================================================
-            from icda.classifier import QueryComplexity, QueryIntent
             
             if await self._should_use_fast_path(intent, query):
                 logger.info(f"FAST PATH: Skipping full pipeline for simple query")
@@ -1037,6 +1046,74 @@ Try: "Find customers in Nevada" or "Look up CRID-12345\""""
 
         logger.info(f"Fast path approved: intent={intent.primary_intent.value}, confidence={intent.confidence}")
         return True
+
+    async def _handle_out_of_scope(
+        self,
+        query: str,
+        intent: IntentResult,
+        trace: PipelineTrace | None,
+        start_time: float,
+    ) -> QueryResult:
+        """Handle out-of-scope queries with helpful redirect.
+
+        This provides a fast exit path for questions outside the customer
+        data domain, preventing the AI from hallucinating answers.
+
+        Args:
+            query: User query string.
+            intent: Intent classification result.
+            trace: Optional trace for debugging.
+            start_time: Pipeline start timestamp.
+
+        Returns:
+            QueryResult with scope-aware response.
+        """
+        response = (
+            "I'm **ICDA**, your customer data assistant. I specialize in:\n\n"
+            "- **Searching customers** by name, state, city, or other criteria\n"
+            "- **Looking up customer records** by CRID\n"
+            "- **Verifying and normalizing addresses**\n"
+            "- **Statistics and analysis** of customer data\n"
+            "- **Move history tracking** for customers\n\n"
+            "Your question appears to be outside my area of expertise. "
+            "How can I help you with your customer data today?"
+        )
+
+        total_ms = int((time.time() - start_time) * 1000)
+
+        if trace:
+            trace.add_stage(
+                agent="out_of_scope",
+                output={
+                    "intent": intent.primary_intent.value,
+                    "confidence": intent.confidence,
+                    "reason": "Query outside customer data domain",
+                },
+                time_ms=total_ms,
+                success=True,
+                confidence=intent.confidence,
+            )
+            trace.total_time_ms = total_ms
+            trace.success = True
+
+        return QueryResult(
+            success=True,
+            response=response,
+            route="out_of_scope",
+            tools_used=[],
+            quality_score=0.95,  # High quality - correctly handled
+            latency_ms=total_ms,
+            trace=trace,
+            metadata={
+                "intent": intent.to_dict(),
+                "out_of_scope": True,
+                "agents_skipped": [
+                    "memory", "context", "parser", "resolver", "search",
+                    "knowledge", "nova", "enforcer", "personality", "suggestions"
+                ],
+            },
+            results=[],
+        )
 
     async def _execute_fast_path(
         self,

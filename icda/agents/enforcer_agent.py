@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 class EnforcerAgent:
     """Validates and enforces response quality with secondary LLM integration.
 
-    Follows the enforcer pattern with 7 quality gates:
+    Follows the enforcer pattern with 10 quality gates:
     1. RESPONSIVE - Response addresses the query
     2. FACTUAL - Response matches tool results
     3. PII_SAFE - No leaked sensitive data
@@ -44,6 +44,9 @@ class EnforcerAgent:
     5. COHERENT - Response is well-formed
     6. ON_TOPIC - No off-topic content
     7. CONFIDENCE_MET - Above threshold
+    8. FILTER_MATCH - Results match requested filters
+    9. PR_ADDRESS_QUALITY - Puerto Rico addresses have urbanization
+    10. DOMAIN_RELEVANT - Response is within customer data domain
 
     When LLM enforcer is available (Gemini, OpenAI, Claude, etc.),
     adds AI-powered validation for hallucination detection.
@@ -180,6 +183,13 @@ class EnforcerAgent:
             gates_passed.append(pr_address_result)
         else:
             gates_failed.append(pr_address_result)
+
+        # Gate 10: Domain Relevant - is response within customer data domain?
+        domain_result = self._check_domain_relevant(modified, intent, parsed)
+        if domain_result.passed:
+            gates_passed.append(domain_result)
+        else:
+            gates_failed.append(domain_result)
 
         # Optional: LLM AI-powered validation for hallucination detection
         llm_quality_boost = 0.0
@@ -527,16 +537,31 @@ class EnforcerAgent:
         """
         response_lower = response.lower()
 
-        # Check for off-topic indicators
+        # Check for off-topic indicators (expanded list)
         off_topic_phrases = [
+            # AI self-awareness
             "i'm an ai",
             "as an ai",
             "i was created",
             "my training",
             "i don't have personal",
+            "as a language model",
+            "my knowledge cutoff",
+            # General topics
             "weather",
             "recipe",
             "joke",
+            "stock market",
+            "stock price",
+            "cryptocurrency",
+            "bitcoin",
+            "sports score",
+            "election",
+            "president of",
+            "capital of",
+            "who won the",
+            "movie review",
+            "music recommendation",
         ]
 
         for phrase in off_topic_phrases:
@@ -575,6 +600,91 @@ class EnforcerAgent:
             gate=QualityGate.CONFIDENCE_MET,
             passed=False,
             message=f"AI confidence {ai_confidence:.2f} < {threshold}",
+        )
+
+    def _check_domain_relevant(
+        self,
+        response: str,
+        intent: IntentResult,
+        parsed: ParsedQuery,
+    ) -> QualityGateResult:
+        """Check if response is relevant to customer data domain.
+
+        This gate validates that:
+        1. Out-of-scope queries get appropriate redirect responses
+        2. In-scope queries don't drift into off-topic content
+        3. Responses stay focused on customer data
+
+        Args:
+            response: Response text.
+            intent: Intent classification.
+            parsed: Parsed query with scope assessment.
+
+        Returns:
+            QualityGateResult.
+        """
+        from icda.classifier import QueryIntent
+
+        response_lower = response.lower()
+        scope = parsed.query_scope
+
+        # If query was classified as out-of-scope, response should acknowledge it
+        if intent.primary_intent == QueryIntent.OUT_OF_SCOPE:
+            redirect_indicators = [
+                "customer data",
+                "specialize in",
+                "can help you with",
+                "i'm icda",
+                "customer data assistant",
+                "outside my",
+                "area of expertise",
+            ]
+            if any(ind in response_lower for ind in redirect_indicators):
+                return QualityGateResult(
+                    gate=QualityGate.DOMAIN_RELEVANT,
+                    passed=True,
+                    message="Response appropriately handles out-of-scope query",
+                )
+            # Response didn't redirect - may have hallucinated
+            return QualityGateResult(
+                gate=QualityGate.DOMAIN_RELEVANT,
+                passed=False,
+                message="Out-of-scope query not redirected properly",
+            )
+
+        # If parser marked as out_of_scope
+        if scope.get("assessment") == "out_of_scope":
+            if any(ind in response_lower for ind in ["customer data", "specialize"]):
+                return QualityGateResult(
+                    gate=QualityGate.DOMAIN_RELEVANT,
+                    passed=True,
+                    message="Response acknowledges scope limitation",
+                )
+
+        # For in-scope queries, check response doesn't contain off-topic hallucinations
+        hallucination_indicators = [
+            "as an ai language model",
+            "i cannot provide real-time",
+            "my knowledge cutoff",
+            "i don't have access to current",
+            "i cannot browse the internet",
+        ]
+
+        for indicator in hallucination_indicators:
+            if indicator in response_lower:
+                # Exception: if response also mentions customer data, it's OK
+                if "customer" in response_lower or "crid" in response_lower:
+                    continue
+                return QualityGateResult(
+                    gate=QualityGate.DOMAIN_RELEVANT,
+                    passed=False,
+                    message=f"Response contains off-domain content: '{indicator}'",
+                )
+
+        return QualityGateResult(
+            gate=QualityGate.DOMAIN_RELEVANT,
+            passed=True,
+            message="Response is relevant to customer data domain",
         )
 
     def _check_filter_match(
@@ -743,6 +853,87 @@ class EnforcerAgent:
             passed=True,
             message=f"All {len(pr_addresses)} PR addresses validated with urbanization",
         ), 0.0
+
+    def _check_domain_relevant(
+        self,
+        response: str,
+        intent: IntentResult,
+        parsed: ParsedQuery,
+    ) -> QualityGateResult:
+        """Check if the response is relevant to the customer data domain.
+
+        This gate catches responses that drift into unrelated topics or
+        attempt to answer questions outside the system's scope.
+
+        Args:
+            response: Response text.
+            intent: Intent classification.
+            parsed: Parsed query with scope assessment.
+
+        Returns:
+            QualityGateResult.
+        """
+        from icda.classifier import QueryIntent
+
+        # Check query scope from parser
+        scope = parsed.query_scope
+        assessment = scope.get("assessment", "in_scope")
+
+        # If query was out of scope, check that response acknowledges it properly
+        if assessment == "out_of_scope":
+            response_lower = response.lower()
+            # Response should redirect user to customer data capabilities
+            redirect_phrases = [
+                "customer data",
+                "can help with",
+                "specialize in",
+                "customer search",
+                "address verification",
+                "i'm icda",
+            ]
+            if any(phrase in response_lower for phrase in redirect_phrases):
+                return QualityGateResult(
+                    gate=QualityGate.DOMAIN_RELEVANT,
+                    passed=True,
+                    message="Response appropriately redirects out-of-scope query",
+                )
+            return QualityGateResult(
+                gate=QualityGate.DOMAIN_RELEVANT,
+                passed=False,
+                message="Response to out-of-scope query doesn't redirect properly",
+            )
+
+        # For in-scope queries, check response doesn't contain irrelevant content
+        response_lower = response.lower()
+        off_domain_indicators = [
+            "i cannot provide information about",
+            "i don't have access to",
+            "my knowledge cutoff",
+            "as an ai language model",
+            "i'm not able to help with",
+            "that's outside my capabilities",
+        ]
+
+        for phrase in off_domain_indicators:
+            if phrase in response_lower:
+                # Check if it's a legitimate limitation message about customer data
+                if "customer" in response_lower or "data" in response_lower:
+                    return QualityGateResult(
+                        gate=QualityGate.DOMAIN_RELEVANT,
+                        passed=True,
+                        message="Response notes limitation while staying on domain",
+                    )
+                return QualityGateResult(
+                    gate=QualityGate.DOMAIN_RELEVANT,
+                    passed=False,
+                    message=f"Response contains off-domain indicator: '{phrase}'",
+                )
+
+        return QualityGateResult(
+            gate=QualityGate.DOMAIN_RELEVANT,
+            passed=True,
+            message="Response is relevant to customer data domain",
+        )
 
     def _determine_status(
         self,
