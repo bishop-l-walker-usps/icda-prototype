@@ -63,12 +63,14 @@ class IntentAgent:
         r"\bdefine\b(?!.*\bcustomer\b)",
         # Coding/Technical
         r"\bwrite\s+(me\s+)?(a\s+)?(code|program|script|function)\b",
+        r"\bwrite\s+me\s+a?\s*(python|javascript|java)\b",
         r"\bprogram\s+in\s+(python|javascript|java|c\+\+)\b",
         r"\bdebug\s+(this|my)\s+(code|program)\b",
         r"\bhow\s+to\s+code\b",
+        r"\b(python|javascript|java)\s+(function|code|script)\b",
         # Food/Recipes
         r"\brecipe\s+for\b",
-        r"\bhow\s+to\s+(cook|bake|make)\b(?!.*\breport\b)",
+        r"\bhow\s+(do\s+i\s+|to\s+)(cook|bake|make)\b(?!.*\breport\b)",
         r"\bingredients?\s+for\b",
         # Health/Medical
         r"\bsymptoms?\s+of\b",
