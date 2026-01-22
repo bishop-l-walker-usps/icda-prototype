@@ -38,4 +38,14 @@ google-genai>=1.0.0
 httpx>=0.27.0
 
 # Testing utilities (optional)
+<<<<<<< HEAD
 rich>=13.0.0
+=======
+rich>=13.0.0
+
+# Databricks SQL (optional - for Delta table access)
+databricks-sql-connector>=3.0.0
+
+# Windows-specific (for file system operations on Windows)
+pywin32>=306; sys_platform == "win32"
+>>>>>>> da41b9c3711f690984b42380e3b8636dd9b054e0
