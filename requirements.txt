@@ -42,3 +42,6 @@ rich>=13.0.0
 
 # Databricks SQL (optional - for Delta table access)
 databricks-sql-connector>=3.0.0
+
+# Windows-specific (for file system operations on Windows)
+pywin32>=306; sys_platform == "win32"
