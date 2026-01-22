@@ -41,6 +41,7 @@ class QualityGate(str, Enum):
     CONFIDENCE_MET = "confidence_met"   # Above threshold
     FILTER_MATCH = "filter_match"       # Results match requested filters (state, city, etc.)
     PR_ADDRESS_QUALITY = "pr_address_quality"  # Puerto Rico address urbanization validation
+    DOMAIN_RELEVANT = "domain_relevant" # Response is relevant to customer data domain
 
 
 class SearchStrategy(str, Enum):
@@ -795,6 +796,7 @@ class ParsedQuery:
         limit: Result limit requested.
         is_follow_up: Whether this continues previous query.
         resolution_notes: Notes about normalizations made.
+        query_scope: Scope assessment (in_scope, out_of_scope, conversational).
     """
     original_query: str
     normalized_query: str
@@ -805,6 +807,11 @@ class ParsedQuery:
     limit: int = 10
     is_follow_up: bool = False
     resolution_notes: list[str] = field(default_factory=list)
+    query_scope: dict[str, Any] = field(default_factory=lambda: {
+        "assessment": "in_scope",
+        "confidence": 1.0,
+        "reason": "default"
+    })
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
@@ -818,6 +825,7 @@ class ParsedQuery:
             "limit": self.limit,
             "is_follow_up": self.is_follow_up,
             "resolution_notes": self.resolution_notes,
+            "query_scope": self.query_scope,
         }
 
 

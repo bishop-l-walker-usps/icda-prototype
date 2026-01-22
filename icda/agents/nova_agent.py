@@ -23,6 +23,7 @@ BOTO_CONFIG = Config(
     retries={'max_attempts': 3}
 )
 
+from icda.classifier import QueryIntent
 from .models import (
     IntentResult,
     QueryContext,
@@ -57,6 +58,15 @@ CRITICAL RULES:
 3. If a state/location has no data, clearly inform the user instead of showing unrelated data
 4. Never reveal SSN, financial, or health data
 5. Maintain conversation context - reference prior exchanges when relevant
+
+SCOPE AWARENESS - CRITICAL:
+- Your ONLY purpose is to help with CUSTOMER DATA queries
+- If someone asks about weather, sports, politics, general knowledge, coding help, etc.:
+  RESPOND: "I'm ICDA, a customer data assistant. I specialize in customer searches,
+  address verification, and data analytics. I can't help with [topic].
+  How can I help you with your customer data today?"
+- NEVER attempt to answer questions outside the customer data domain
+- If unsure whether a question is in scope, ask for clarification
 
 IMPORTANT - CUSTOMER DATA CONTEXT:
 - ALL queries are about CUSTOMER DATA in your database - never about demographics or census
@@ -193,6 +203,15 @@ When relevant, reference this context naturally in your response."""
         # ============================================================
         if getattr(search_result, 'state_not_available', False):
             return self._fallback_response(query, search_result, knowledge)
+
+        # ============================================================
+        # OUT_OF_SCOPE: Handle questions outside customer data domain
+        # This prevents the AI from hallucinating answers about
+        # weather, sports, coding, etc.
+        # ============================================================
+        if intent.primary_intent == QueryIntent.OUT_OF_SCOPE:
+            logger.info(f"NovaAgent: OUT_OF_SCOPE query detected, using scope response")
+            return self._out_of_scope_response(query)
 
         # Use override model if provided
         model_to_use = model_override or self._model
@@ -653,6 +672,40 @@ SESSION CONTEXT:
             model_used="fallback",
             token_usage=TokenUsage(),  # No tokens used for fallback
             ai_confidence=0.5,
+        )
+
+    def _out_of_scope_response(self, query: str) -> NovaResponse:
+        """Generate a helpful response for out-of-scope queries.
+
+        This method handles questions outside the customer data domain
+        (weather, sports, coding, etc.) with a clear, helpful redirect.
+
+        Args:
+            query: The original user query.
+
+        Returns:
+            NovaResponse with scope-aware message.
+        """
+        response = (
+            "I'm **ICDA**, your customer data assistant. I specialize in:\n\n"
+            "- **Searching customers** by name, state, city, or other criteria\n"
+            "- **Looking up customer records** by CRID\n"
+            "- **Verifying and normalizing addresses**\n"
+            "- **Statistics and analysis** of customer data\n"
+            "- **Move history tracking** for customers\n\n"
+            "Your question appears to be outside my area of expertise. "
+            "How can I help you with your customer data today?"
+        )
+
+        logger.info(f"NovaAgent: OUT_OF_SCOPE response for query: '{query[:50]}...'")
+
+        return NovaResponse(
+            response_text=response,
+            tools_used=[],
+            tool_results=[],
+            model_used="scope_check",
+            token_usage=TokenUsage(),  # No tokens used
+            ai_confidence=0.95,  # High confidence - we know what we're doing
         )
 
     def _estimate_confidence(

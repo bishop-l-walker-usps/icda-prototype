@@ -35,6 +35,58 @@ class IntentAgent:
     __slots__ = ("_vector_index", "_available")
 
     # Pattern definitions for intent detection
+    # OUT_OF_SCOPE PATTERNS - Questions clearly outside customer data domain
+    OUT_OF_SCOPE_PATTERNS = (
+        # Weather
+        r"\bweather\b",
+        r"\bforecast\b.*\b(rain|snow|temperature|sunny|cloudy)\b",
+        # Sports
+        r"\b(super\s*bowl|world\s*series|nba|nfl|mlb|nhl|soccer|football\s+game)\b",
+        r"\bwho\s+won\b.*\b(game|match|championship|tournament)\b",
+        r"\bsports?\s+(score|news|update)\b",
+        # Politics/News
+        r"\belection\b",
+        r"\bpresident\s+of\b",
+        r"\bpolitics?\b",
+        r"\bgovernment\b",
+        # Entertainment
+        r"\bmovie\s+(review|recommendation)\b",
+        r"\bmusic\s+(recommendation|playlist)\b",
+        r"\btv\s+show\b",
+        r"\bcelebrit(y|ies)\b",
+        # General knowledge
+        r"\bcapital\s+of\b",
+        r"\bwhat\s+year\s+did\b(?!.*\bcustomer\b)",
+        r"\bhistory\s+of\b(?!.*\bcustomer\b)",
+        r"\bwho\s+invented\b",
+        r"\bwhat\s+is\s+the\s+meaning\s+of\b",
+        r"\bdefine\b(?!.*\bcustomer\b)",
+        # Coding/Technical
+        r"\bwrite\s+(me\s+)?(a\s+)?(code|program|script|function)\b",
+        r"\bprogram\s+in\s+(python|javascript|java|c\+\+)\b",
+        r"\bdebug\s+(this|my)\s+(code|program)\b",
+        r"\bhow\s+to\s+code\b",
+        # Food/Recipes
+        r"\brecipe\s+for\b",
+        r"\bhow\s+to\s+(cook|bake|make)\b(?!.*\breport\b)",
+        r"\bingredients?\s+for\b",
+        # Health/Medical
+        r"\bsymptoms?\s+of\b",
+        r"\bmedical\s+advice\b",
+        r"\btreatment\s+for\b",
+        # Financial (non-customer)
+        r"\bstock\s+(price|market)\b",
+        r"\bcryptocurrency\b",
+        r"\bbitcoin\b",
+        # Travel (non-customer)
+        r"\bflight\s+(to|from)\b",
+        r"\bhotel\s+(in|near)\b",
+        r"\btourist\s+attractions?\b",
+        # Jokes/Fun
+        r"\btell\s+me\s+a\s+joke\b",
+        r"\bfunny\s+story\b",
+    )
+
     # CONVERSATIONAL PATTERNS - Check these FIRST to avoid RAG for simple chat
     CONVERSATIONAL_PATTERNS = (
         r"^(hi|hello|hey|yo|sup|howdy|greetings)[\s!.,]*$",
@@ -283,7 +335,22 @@ class IntentAgent:
         if self._match_patterns(query, self.CONVERSATIONAL_PATTERNS):
             signals["patterns_matched"].append("conversational")
             return QueryIntent.CONVERSATIONAL, 0.95
-        
+
+        # OUT_OF_SCOPE CHECK - detect questions outside customer data domain
+        if self._match_patterns(query, self.OUT_OF_SCOPE_PATTERNS):
+            signals["patterns_matched"].append("out_of_scope")
+            logger.info(f"IntentAgent: OUT_OF_SCOPE detected for query: '{query[:50]}...'")
+            return QueryIntent.OUT_OF_SCOPE, 0.9
+
+        # Check domain relevance for longer queries without data keywords
+        if len(query.split()) > 5 and not self._has_data_keywords(query):
+            domain_relevance = self._calculate_domain_relevance(query)
+            if domain_relevance < 0.2:
+                signals["patterns_matched"].append("out_of_scope_low_relevance")
+                signals["domain_relevance"] = domain_relevance
+                logger.info(f"IntentAgent: OUT_OF_SCOPE (low relevance={domain_relevance:.2f})")
+                return QueryIntent.OUT_OF_SCOPE, 0.75
+
         # Short queries without data keywords = likely conversational
         if len(query.split()) < 5 and not self._has_data_keywords(query):
             signals["patterns_matched"].append("conversational_short")
@@ -520,3 +587,51 @@ class IntentAgent:
     def _match_patterns(self, text: str, patterns: tuple) -> bool:
         """Check if any pattern matches the text."""
         return any(re.search(p, text, re.IGNORECASE) for p in patterns)
+
+    def _calculate_domain_relevance(self, query: str) -> float:
+        """Calculate how relevant the query is to customer data domain.
+
+        Returns:
+            Score from 0.0 (irrelevant) to 1.0 (highly relevant).
+        """
+        score = 0.0
+        q = query.lower()
+
+        # Strong relevance signals (customer data specific)
+        strong_signals = [
+            "customer", "crid", "address", "zip", "moved", "move count",
+            "status", "inactive", "active", "pending", "search", "find",
+            "lookup", "verify", "normalize"
+        ]
+        for signal in strong_signals:
+            if signal in q:
+                score += 0.3
+
+        # Medium relevance signals (could be customer-related)
+        medium_signals = [
+            "name", "how many", "count", "list", "show", "people",
+            "who", "where", "state", "city"
+        ]
+        for signal in medium_signals:
+            if signal in q:
+                score += 0.15
+
+        # State names add strong relevance (likely asking about customers in a state)
+        state_names = [
+            "alabama", "alaska", "arizona", "arkansas", "california",
+            "colorado", "connecticut", "delaware", "florida", "georgia",
+            "hawaii", "idaho", "illinois", "indiana", "iowa", "kansas",
+            "kentucky", "louisiana", "maine", "maryland", "massachusetts",
+            "michigan", "minnesota", "mississippi", "missouri", "montana",
+            "nebraska", "nevada", "new hampshire", "new jersey", "new mexico",
+            "new york", "north carolina", "north dakota", "ohio", "oklahoma",
+            "oregon", "pennsylvania", "rhode island", "south carolina",
+            "south dakota", "tennessee", "texas", "utah", "vermont",
+            "virginia", "washington", "west virginia", "wisconsin", "wyoming"
+        ]
+        for state in state_names:
+            if state in q:
+                score += 0.25
+                break
+
+        return min(1.0, score)
