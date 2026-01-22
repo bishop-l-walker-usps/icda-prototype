@@ -23,9 +23,9 @@ Enhanced with:
 import logging
 import re
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from enum import Enum
 from typing import Any
-from difflib import SequenceMatcher
 
 from icda.address_models import (
     AddressComponent,
@@ -37,7 +37,6 @@ from icda.address_normalizer import (
     AddressNormalizer,
     STATE_ABBREVIATIONS,
     STREET_TYPES,
-    DIRECTIONALS,
     is_puerto_rico_zip,
 )
 from icda.config import cfg
@@ -51,6 +50,10 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 # ZIP code to city/state mappings for completion (subset - would be full USPS DB in production)
+_CITY_NEW_YORK = "New York"
+_CITY_SAN_FRANCISCO = "San Francisco"
+_CITY_SAN_JUAN = "San Juan"
+
 ZIP_CITY_STATE: dict[str, tuple[str, str]] = {
     # Virginia
     "22201": ("Arlington", "VA"),
@@ -72,16 +75,16 @@ ZIP_CITY_STATE: dict[str, tuple[str, str]] = {
     "20002": ("Washington", "DC"),
     "20003": ("Washington", "DC"),
     # New York
-    "10001": ("New York", "NY"),
-    "10002": ("New York", "NY"),
-    "10003": ("New York", "NY"),
-    "10004": ("New York", "NY"),
-    "10005": ("New York", "NY"),
-    "10010": ("New York", "NY"),
-    "10011": ("New York", "NY"),
-    "10012": ("New York", "NY"),
-    "10013": ("New York", "NY"),
-    "10014": ("New York", "NY"),
+    "10001": (_CITY_NEW_YORK, "NY"),
+    "10002": (_CITY_NEW_YORK, "NY"),
+    "10003": (_CITY_NEW_YORK, "NY"),
+    "10004": (_CITY_NEW_YORK, "NY"),
+    "10005": (_CITY_NEW_YORK, "NY"),
+    "10010": (_CITY_NEW_YORK, "NY"),
+    "10011": (_CITY_NEW_YORK, "NY"),
+    "10012": (_CITY_NEW_YORK, "NY"),
+    "10013": (_CITY_NEW_YORK, "NY"),
+    "10014": (_CITY_NEW_YORK, "NY"),
     "11201": ("Brooklyn", "NY"),
     "11202": ("Brooklyn", "NY"),
     "11203": ("Brooklyn", "NY"),
@@ -89,9 +92,9 @@ ZIP_CITY_STATE: dict[str, tuple[str, str]] = {
     "90001": ("Los Angeles", "CA"),
     "90002": ("Los Angeles", "CA"),
     "90210": ("Beverly Hills", "CA"),
-    "94102": ("San Francisco", "CA"),
-    "94103": ("San Francisco", "CA"),
-    "94104": ("San Francisco", "CA"),
+    "94102": (_CITY_SAN_FRANCISCO, "CA"),
+    "94103": (_CITY_SAN_FRANCISCO, "CA"),
+    "94104": (_CITY_SAN_FRANCISCO, "CA"),
     "92101": ("San Diego", "CA"),
     "92102": ("San Diego", "CA"),
     # Texas
@@ -112,11 +115,11 @@ ZIP_CITY_STATE: dict[str, tuple[str, str]] = {
     "60602": ("Chicago", "IL"),
     "60603": ("Chicago", "IL"),
     # Puerto Rico
-    "00901": ("San Juan", "PR"),
-    "00902": ("San Juan", "PR"),
-    "00907": ("San Juan", "PR"),
+    "00901": (_CITY_SAN_JUAN, "PR"),
+    "00902": (_CITY_SAN_JUAN, "PR"),
+    "00907": (_CITY_SAN_JUAN, "PR"),
     "00926": ("Rio Piedras", "PR"),
-    "00927": ("San Juan", "PR"),
+    "00927": (_CITY_SAN_JUAN, "PR"),
     "00961": ("Bayamon", "PR"),
     "00983": ("Carolina", "PR"),
 }
@@ -210,25 +213,28 @@ STATE_TYPOS: dict[str, str] = {
 
 class ValidationMode(str, Enum):
     """Mode of validation operation."""
-    VALIDATE = "validate"       # Check validity only
-    COMPLETE = "complete"       # Fill missing components
-    CORRECT = "correct"         # Fix errors
-    STANDARDIZE = "standardize" # Format to standard
+
+    VALIDATE = "validate"  # Check validity only
+    COMPLETE = "complete"  # Fill missing components
+    CORRECT = "correct"  # Fix errors
+    STANDARDIZE = "standardize"  # Format to standard
 
 
 class ComponentConfidence(str, Enum):
     """Confidence level for individual components."""
-    EXACT = "exact"             # Exact match verified
-    HIGH = "high"               # Very confident (> 90%)
-    MEDIUM = "medium"           # Reasonably confident (70-90%)
-    LOW = "low"                 # Uncertain (50-70%)
-    INFERRED = "inferred"       # Derived from other components
-    MISSING = "missing"         # Component not present
+
+    EXACT = "exact"  # Exact match verified
+    HIGH = "high"  # Very confident (> 90%)
+    MEDIUM = "medium"  # Reasonably confident (70-90%)
+    LOW = "low"  # Uncertain (50-70%)
+    INFERRED = "inferred"  # Derived from other components
+    MISSING = "missing"  # Component not present
 
 
 @dataclass(slots=True)
 class ComponentScore:
     """Detailed score for a single address component."""
+
     component: AddressComponent
     confidence: ComponentConfidence
     score: float  # 0.0 - 1.0
@@ -256,6 +262,7 @@ class ComponentScore:
 @dataclass(slots=True)
 class ValidationIssue:
     """Issue found during validation."""
+
     severity: str  # "error", "warning", "info"
     component: AddressComponent | None
     message: str
@@ -275,6 +282,7 @@ class ValidationIssue:
 @dataclass(slots=True)
 class ValidationResult:
     """Comprehensive validation result with detailed scoring."""
+
     # Overall status
     is_valid: bool
     is_deliverable: bool
@@ -389,8 +397,7 @@ class AddressValidatorEngine:
         # Handle empty input
         if not sanitized_address:
             return self._create_invalid_result(
-                raw_address or "",
-                "Empty or invalid address input"
+                raw_address or "", "Empty or invalid address input"
             )
 
         try:
@@ -417,13 +424,17 @@ class AddressValidatorEngine:
 
             # Step 8: Determine quality and status
             quality = self._determine_quality(overall_confidence, issues)
-            status = self._determine_status(overall_confidence, typo_corrections, completions)
+            status = self._determine_status(
+                overall_confidence, typo_corrections, completions
+            )
 
             # Step 9: Check validity and deliverability
             is_valid = overall_confidence >= self.THRESHOLD_VALID and not any(
                 i.severity == "error" for i in issues
             )
-            is_deliverable = overall_confidence >= self.THRESHOLD_DELIVERABLE and is_valid
+            is_deliverable = (
+                overall_confidence >= self.THRESHOLD_DELIVERABLE and is_valid
+            )
 
             # Step 10: Generate standardized format (even for partial/inferred results)
             standardized = None
@@ -466,7 +477,21 @@ class AddressValidatorEngine:
                 quality=quality,
                 status=status,
                 original=parsed,
-                validated=completed if is_valid else None,
+                # In COMPLETE mode, callers expect our best-effort completion even
+                # if the address isn't fully "valid" yet. We return the completed
+                # structure when confidence is at least "suggested" so the UI/API
+                # can show the best guess along with component scores/issues.
+                validated=(
+                    completed
+                    if (
+                        is_valid
+                        or (
+                            mode == ValidationMode.COMPLETE
+                            and overall_confidence >= 0.50
+                        )
+                    )
+                    else None
+                ),
                 standardized=standardized,
                 component_scores=component_scores,
                 issues=issues,
@@ -483,7 +508,9 @@ class AddressValidatorEngine:
             )
         except Exception as e:
             logger.error(f"Validation error for address '{raw_address[:50]}...': {e}")
-            return self._create_invalid_result(raw_address, f"Validation error: {str(e)}")
+            return self._create_invalid_result(
+                raw_address, f"Validation error: {str(e)}"
+            )
 
     def _create_invalid_result(
         self,
@@ -502,12 +529,14 @@ class AddressValidatorEngine:
             validated=None,
             standardized=None,
             component_scores=[],
-            issues=[ValidationIssue(
-                severity="error",
-                component=None,
-                message=error_message,
-                auto_fixable=False,
-            )],
+            issues=[
+                ValidationIssue(
+                    severity="error",
+                    component=None,
+                    message=error_message,
+                    auto_fixable=False,
+                )
+            ],
             corrections_applied=[],
             completions_applied=[],
             alternatives=[],
@@ -525,45 +554,44 @@ class AddressValidatorEngine:
         Returns:
             Tuple of (corrected string, list of corrections made).
         """
-        corrections = []
-        result = raw
-        correction_count = 0
+        corrections: list[str] = []
+        result: str = raw
 
         # Lowercase for matching
-        lower = raw.lower()
+        lower: str = raw.lower()
 
         # Check for English street type typos
         for typo, correct in COMMON_TYPOS.items():
-            if correction_count >= self.MAX_TYPO_CORRECTIONS:
+            if len(corrections) >= self.MAX_TYPO_CORRECTIONS:
                 break
             pattern = r"\b" + re.escape(typo) + r"\b"
             if re.search(pattern, lower, re.IGNORECASE):
                 result = re.sub(pattern, correct, result, flags=re.IGNORECASE)
                 corrections.append(f"Corrected '{typo}' to '{correct}'")
                 lower = result.lower()
-                correction_count += 1
+                corrections += 1
 
         # Check for Spanish typos (common in PR addresses)
         for typo, correct in SPANISH_TYPOS.items():
-            if correction_count >= self.MAX_TYPO_CORRECTIONS:
+            if len(corrections) >= self.MAX_TYPO_CORRECTIONS:
                 break
             pattern = r"\b" + re.escape(typo) + r"\b"
             if re.search(pattern, lower, re.IGNORECASE):
                 result = re.sub(pattern, correct, result, flags=re.IGNORECASE)
                 corrections.append(f"Corrected Spanish '{typo}' to '{correct}'")
                 lower = result.lower()
-                correction_count += 1
+                corrections += 1
 
         # Check for state name typos
         for typo, correct in STATE_TYPOS.items():
-            if correction_count >= self.MAX_TYPO_CORRECTIONS:
+            if len(corrections) >= self.MAX_TYPO_CORRECTIONS:
                 break
             if typo in lower:
                 result = result.replace(typo, correct)
                 result = result.replace(typo.title(), correct.title())
                 corrections.append(f"Corrected state '{typo}' to '{correct}'")
                 lower = result.lower()
-                correction_count += 1
+                corrections += 1
 
         # Fix common formatting issues (don't count as typo corrections)
         # Double spaces
@@ -642,7 +670,9 @@ class AddressValidatorEngine:
 
             if not completed.city:
                 completed.city = city
-                completions.append(f"Inferred city '{city}' from ZIP {completed.zip_code}")
+                completions.append(
+                    f"Inferred city '{city}' from ZIP {completed.zip_code}"
+                )
                 if AddressComponent.CITY not in completed.components_found:
                     completed.components_found.append(AddressComponent.CITY)
                 if AddressComponent.CITY in completed.components_missing:
@@ -650,7 +680,9 @@ class AddressValidatorEngine:
 
             if not completed.state:
                 completed.state = state
-                completions.append(f"Inferred state '{state}' from ZIP {completed.zip_code}")
+                completions.append(
+                    f"Inferred state '{state}' from ZIP {completed.zip_code}"
+                )
                 if AddressComponent.STATE not in completed.components_found:
                     completed.components_found.append(AddressComponent.STATE)
                 if AddressComponent.STATE in completed.components_missing:
@@ -870,7 +902,11 @@ class AddressValidatorEngine:
             validated_value=validated.street_name,
             was_corrected=orig != val,
             was_completed=False,
-            correction_reason=f"Street name '{original.street_name}' -> '{validated.street_name}'" if orig != val else None,
+            correction_reason=(
+                f"Street name '{original.street_name}' -> '{validated.street_name}'"
+                if orig != val
+                else None
+            ),
         )
 
     def _score_street_type(
@@ -989,7 +1025,9 @@ class AddressValidatorEngine:
             validated_value=validated.city,
             was_corrected=orig != val,
             was_completed=False,
-            correction_reason=f"City '{original.city}' -> '{validated.city}'" if orig != val else None,
+            correction_reason=(
+                f"City '{original.city}' -> '{validated.city}'" if orig != val else None
+            ),
         )
 
     def _score_state(
@@ -1126,7 +1164,9 @@ class AddressValidatorEngine:
             score = 1.0 if orig else 0.5
             return ComponentScore(
                 component=AddressComponent.UNIT,
-                confidence=ComponentConfidence.EXACT if orig else ComponentConfidence.MISSING,
+                confidence=(
+                    ComponentConfidence.EXACT if orig else ComponentConfidence.MISSING
+                ),
                 score=score,
                 original_value=orig,
                 validated_value=val,
@@ -1193,13 +1233,19 @@ class AddressValidatorEngine:
 
         return ComponentScore(
             component=AddressComponent.URBANIZATION,
-            confidence=ComponentConfidence.MEDIUM if similarity > 0.7 else ComponentConfidence.LOW,
+            confidence=(
+                ComponentConfidence.MEDIUM
+                if similarity > 0.7
+                else ComponentConfidence.LOW
+            ),
             score=similarity,
             original_value=orig,
             validated_value=val,
             was_corrected=True,
             was_completed=False,
-            correction_reason=f"Urbanization '{orig}' -> '{val}'" if orig != val else None,
+            correction_reason=(
+                f"Urbanization '{orig}' -> '{val}'" if orig != val else None
+            ),
         )
 
     def _identify_issues(
@@ -1212,80 +1258,96 @@ class AddressValidatorEngine:
 
         # Check for missing required components
         if not address.street_number:
-            issues.append(ValidationIssue(
-                severity="error",
-                component=AddressComponent.STREET_NUMBER,
-                message="Missing street number",
-                suggestion="Add street number (e.g., '123 Main St')",
-                auto_fixable=False,
-            ))
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    component=AddressComponent.STREET_NUMBER,
+                    message="Missing street number",
+                    suggestion="Add street number (e.g., '123 Main St')",
+                    auto_fixable=False,
+                )
+            )
 
         if not address.street_name:
-            issues.append(ValidationIssue(
-                severity="error",
-                component=AddressComponent.STREET_NAME,
-                message="Missing street name",
-                suggestion="Add street name",
-                auto_fixable=False,
-            ))
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    component=AddressComponent.STREET_NAME,
+                    message="Missing street name",
+                    suggestion="Add street name",
+                    auto_fixable=False,
+                )
+            )
 
         if not address.city and not address.zip_code:
-            issues.append(ValidationIssue(
-                severity="error",
-                component=AddressComponent.CITY,
-                message="Missing city and ZIP code - cannot determine location",
-                suggestion="Add at least city or ZIP code",
-                auto_fixable=False,
-            ))
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    component=AddressComponent.CITY,
+                    message="Missing city and ZIP code - cannot determine location",
+                    suggestion="Add at least city or ZIP code",
+                    auto_fixable=False,
+                )
+            )
 
         if not address.state and not address.zip_code:
-            issues.append(ValidationIssue(
-                severity="error",
-                component=AddressComponent.STATE,
-                message="Missing state and ZIP code - cannot determine location",
-                suggestion="Add at least state or ZIP code",
-                auto_fixable=False,
-            ))
+            issues.append(
+                ValidationIssue(
+                    severity="error",
+                    component=AddressComponent.STATE,
+                    message="Missing state and ZIP code - cannot determine location",
+                    suggestion="Add at least state or ZIP code",
+                    auto_fixable=False,
+                )
+            )
 
         # Warnings for optional but recommended
         if not address.zip_code:
-            issues.append(ValidationIssue(
-                severity="warning",
-                component=AddressComponent.ZIP_CODE,
-                message="Missing ZIP code - reduces delivery accuracy",
-                suggestion="Add 5-digit ZIP code",
-                auto_fixable=True,  # Can be inferred from city/state
-            ))
+            issues.append(
+                ValidationIssue(
+                    severity="warning",
+                    component=AddressComponent.ZIP_CODE,
+                    message="Missing ZIP code - reduces delivery accuracy",
+                    suggestion="Add 5-digit ZIP code",
+                    auto_fixable=True,  # Can be inferred from city/state
+                )
+            )
 
         if not address.street_type:
-            issues.append(ValidationIssue(
-                severity="info",
-                component=AddressComponent.STREET_TYPE,
-                message="Missing street type (St, Ave, Blvd, etc.)",
-                suggestion="Add street type suffix for clarity",
-                auto_fixable=True,
-            ))
+            issues.append(
+                ValidationIssue(
+                    severity="info",
+                    component=AddressComponent.STREET_TYPE,
+                    message="Missing street type (St, Ave, Blvd, etc.)",
+                    suggestion="Add street type suffix for clarity",
+                    auto_fixable=True,
+                )
+            )
 
         # Puerto Rico specific
         if address.is_puerto_rico and not address.urbanization:
-            issues.append(ValidationIssue(
-                severity="warning",
-                component=AddressComponent.URBANIZATION,
-                message="Puerto Rico address missing urbanization (URB)",
-                suggestion="Add 'URB [name]' before street address for PR deliverability",
-                auto_fixable=False,
-            ))
+            issues.append(
+                ValidationIssue(
+                    severity="warning",
+                    component=AddressComponent.URBANIZATION,
+                    message="Puerto Rico address missing urbanization (URB)",
+                    suggestion="Add 'URB [name]' before street address for PR deliverability",
+                    auto_fixable=False,
+                )
+            )
 
         # Check for low confidence components
         for score in component_scores:
             if score.confidence == ComponentConfidence.LOW and score.original_value:
-                issues.append(ValidationIssue(
-                    severity="warning",
-                    component=score.component,
-                    message=f"Low confidence for {score.component.value}: '{score.original_value}'",
-                    suggestion=f"Verify {score.component.value} is correct",
-                    auto_fixable=False,
-                ))
+                issues.append(
+                    ValidationIssue(
+                        severity="warning",
+                        component=score.component,
+                        message=f"Low confidence for {score.component.value}: '{score.original_value}'",
+                        suggestion=f"Verify {score.component.value} is correct",
+                        auto_fixable=False,
+                    )
+                )
 
         return issues
 
@@ -1302,7 +1364,10 @@ class AddressValidatorEngine:
             weight = self.COMPONENT_WEIGHTS.get(score.component, 0.05)
 
             # Adjust weights for PR addresses
-            if address.is_puerto_rico and score.component == AddressComponent.URBANIZATION:
+            if (
+                address.is_puerto_rico
+                and score.component == AddressComponent.URBANIZATION
+            ):
                 weight = 0.10  # Higher weight for PR
 
             weighted_sum += score.score * weight

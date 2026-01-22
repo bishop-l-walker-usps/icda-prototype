@@ -24,12 +24,7 @@ _embedder = None
 _db = None
 
 
-def configure_completion_router(
-    pipeline,
-    vector_index=None,
-    embedder=None,
-    db=None
-):
+def configure_completion_router(pipeline, vector_index=None, embedder=None, db=None):
     """Configure router with pipeline dependencies.
 
     Args:
@@ -47,21 +42,29 @@ def configure_completion_router(
 
 # Request/Response Models
 
+
 class CompletionRequest(BaseModel):
     """Request for address completion."""
-    address: str = Field(..., min_length=1, max_length=500, description="Partial or incomplete address")
+
+    address: str = Field(
+        ..., min_length=1, max_length=500, description="Partial or incomplete address"
+    )
     use_cache: bool = Field(True, description="Use cached results if available")
-    return_suggestions: bool = Field(False, description="Include alternative suggestions")
+    return_suggestions: bool = Field(e, description="Include alternative suggestions")
 
 
 class BatchCompletionRequest(BaseModel):
     """Request for batch address completion."""
-    addresses: List[str] = Field(..., min_items=1, max_items=1000, description="List of addresses to complete")
+
+    addresses: List[str] = Field(
+        ..., min_items=1, max_items=1000, description="List of addresses to complete"
+    )
     concurrency: int = Field(10, ge=1, le=50, description="Max concurrent completions")
 
 
 class CompletionResponse(BaseModel):
     """Response for address completion."""
+
     success: bool
     original: str
     completed: Optional[str]
@@ -74,6 +77,7 @@ class CompletionResponse(BaseModel):
 
 class BatchCompletionResponse(BaseModel):
     """Response for batch completion."""
+
     success: bool
     total: int
     completed: int
@@ -86,12 +90,16 @@ class BatchCompletionResponse(BaseModel):
 
 class IndexBuildRequest(BaseModel):
     """Request to build/rebuild index."""
+
     recreate: bool = Field(False, description="Drop and recreate index")
-    warmup_cache: bool = Field(True, description="Pre-populate cache with common patterns")
+    warmup_cache: bool = Field(
+        True, description="Pre-populate cache with common patterns"
+    )
 
 
 class IndexBuildResponse(BaseModel):
     """Response from index build."""
+
     success: bool
     indexed: int
     failed: int
@@ -101,6 +109,7 @@ class IndexBuildResponse(BaseModel):
 
 
 # Endpoints
+
 
 @router.post("/complete", response_model=CompletionResponse)
 async def complete_address(request: CompletionRequest):
@@ -114,13 +123,15 @@ async def complete_address(request: CompletionRequest):
     Returns the completed address with confidence score and source.
     """
     if not _pipeline:
-        raise HTTPException(status_code=503, detail="Completion pipeline not initialized")
+        raise HTTPException(
+            status_code=503, detail="Completion pipeline not initialized"
+        )
 
     try:
         result = await _pipeline.complete(
             address=request.address,
             use_cache=request.use_cache,
-            return_suggestions=request.return_suggestions
+            return_suggestions=request.return_suggestions,
         )
 
         return CompletionResponse(
@@ -131,7 +142,7 @@ async def complete_address(request: CompletionRequest):
             source=result.source.value,
             crid=result.crid,
             suggestions=result.suggestions,
-            reason=result.reason
+            reason=result.reason,
         )
 
     except Exception as e:
@@ -147,12 +158,13 @@ async def complete_batch(request: BatchCompletionRequest):
     Returns results for each address along with aggregate statistics.
     """
     if not _pipeline:
-        raise HTTPException(status_code=503, detail="Completion pipeline not initialized")
+        raise HTTPException(
+            status_code=503, detail="Completion pipeline not initialized"
+        )
 
     try:
         batch_result = await _pipeline.complete_batch(
-            addresses=request.addresses,
-            concurrency=request.concurrency
+            addresses=request.addresses, concurrency=request.concurrency
         )
 
         return BatchCompletionResponse(
@@ -171,10 +183,10 @@ async def complete_batch(request: BatchCompletionRequest):
                     confidence=r.confidence,
                     source=r.source.value,
                     crid=r.crid,
-                    reason=r.reason
+                    reason=r.reason,
                 )
                 for r in batch_result.results
-            ]
+            ],
         )
 
     except Exception as e:
@@ -196,22 +208,16 @@ async def get_stats():
         return {
             "success": False,
             "available": False,
-            "error": "Pipeline not initialized"
+            "error": "Pipeline not initialized",
         }
 
     try:
         stats = await _pipeline.get_stats()
-        return {
-            "success": True,
-            **stats
-        }
+        return {"success": True, **stats}
 
     except Exception as e:
         logger.error(f"Stats error: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
 @router.post("/index/build", response_model=IndexBuildResponse)
@@ -238,37 +244,34 @@ async def build_index(request: IndexBuildRequest):
                 indexed=0,
                 failed=0,
                 skipped=0,
-                error="Failed to create index"
+                error="Failed to create index",
             )
 
         # Index customers
         stats = await _vector_index.index_customers_batch(
-            customers=_db.customers,
-            batch_size=100
+            customers=_db.customers, batch_size=100
         )
 
         # Warm cache
         cache_warmed = None
         if request.warmup_cache and _pipeline:
             warmup_stats = await _pipeline.warmup_cache(_db.customers)
-            cache_warmed = warmup_stats.get("exact", 0) + warmup_stats.get("variations", 0)
+            cache_warmed = warmup_stats.get("exact", 0) + warmup_stats.get(
+                "variations", 0
+            )
 
         return IndexBuildResponse(
             success=True,
             indexed=stats.get("indexed", 0),
             failed=stats.get("failed", 0),
             skipped=stats.get("skipped", 0),
-            cache_warmed=cache_warmed
+            cache_warmed=cache_warmed,
         )
 
     except Exception as e:
         logger.error(f"Index build error: {e}")
         return IndexBuildResponse(
-            success=False,
-            indexed=0,
-            failed=0,
-            skipped=0,
-            error=str(e)
+            success=False, indexed=0, failed=0, skipped=0, error=str(e)
         )
 
 
@@ -283,10 +286,7 @@ async def clear_cache():
 
     try:
         count = await _pipeline.clear_cache()
-        return {
-            "success": True,
-            "cleared": count
-        }
+        return {"success": True, "cleared": count}
 
     except Exception as e:
         logger.error(f"Cache clear error: {e}")
@@ -298,6 +298,12 @@ async def health_check():
     """Health check for completion pipeline."""
     return {
         "available": _pipeline is not None and _pipeline.available,
-        "vector_index": _vector_index is not None and _vector_index.available if _vector_index else False,
-        "embedder": _embedder is not None and _embedder.available if _embedder else False,
+        "vector_index": (
+            _vector_index is not None and _vector_index.available
+            if _vector_index
+            else False
+        ),
+        "embedder": (
+            _embedder is not None and _embedder.available if _embedder else False
+        ),
     }

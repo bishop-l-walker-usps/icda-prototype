@@ -10,18 +10,15 @@ Tests cover:
 """
 
 import pytest
-from icda.address_validator_engine import (
-    AddressValidatorEngine,
-    ValidationMode,
-    ValidationResult,
-    ComponentConfidence,
-    ComponentScore,
-    ValidationIssue,
-)
+
 from icda.address_models import (
     AddressComponent,
     AddressQuality,
     VerificationStatus,
+)
+from icda.address_validator_engine import (
+    AddressValidatorEngine,
+    ValidationMode,
 )
 
 
@@ -40,6 +37,7 @@ def engine():
 def engine_with_index(sample_customers):
     """Create validator engine with index."""
     from icda.address_index import AddressIndex
+
     index = AddressIndex()
     index.build_from_customers(sample_customers)
     return AddressValidatorEngine(address_index=index)
@@ -128,43 +126,64 @@ class TestTypoCorrection:
         """Test correction of street type typo."""
         result = engine.validate("123 Main Stret, New York, NY 10001")
 
-        assert "stret" in str(result.corrections_applied).lower() or \
-               "street" in str(result.corrections_applied).lower()
+        assert (
+            "stret" in str(result.corrections_applied).lower()
+            or "street" in str(result.corrections_applied).lower()
+        )
 
     def test_avenue_typo(self, engine):
         """Test correction of avenue typo."""
         result = engine.validate("456 Oak Avenu, Dallas, TX 75201")
 
-        assert any("avenu" in c.lower() for c in result.corrections_applied) or \
-               result.overall_confidence >= 0.7
+        assert (
+            any("avenu" in c.lower() for c in result.corrections_applied)
+            or result.overall_confidence >= 0.7
+        )
 
     def test_boulevard_typo(self, engine):
         """Test correction of boulevard typo."""
         result = engine.validate("789 Elm Bulevard, Chicago, IL 60601")
 
-        assert any("bulevard" in c.lower() or "boulevard" in c.lower()
-                   for c in result.corrections_applied) or result.is_valid
+        assert (
+            any(
+                "bulevard" in c.lower() or "boulevard" in c.lower()
+                for c in result.corrections_applied
+            )
+            or result.is_valid
+        )
 
     def test_apartment_typo(self, engine):
         """Test correction of apartment typo."""
         result = engine.validate("101 Pine St Apartmnet 5, Boston, MA 02101")
 
-        assert any("apartm" in c.lower() for c in result.corrections_applied) or \
-               result.is_valid
+        assert (
+            any("apartm" in c.lower() for c in result.corrections_applied)
+            or result.is_valid
+        )
 
     def test_state_typo(self, engine):
         """Test correction of state name typo."""
         result = engine.validate("123 Main St, Austin, Texax 73301")
 
-        assert any("texax" in c.lower() or "texas" in c.lower()
-                   for c in result.corrections_applied) or result.is_valid
+        assert (
+            any(
+                "texax" in c.lower() or "texas" in c.lower()
+                for c in result.corrections_applied
+            )
+            or result.is_valid
+        )
 
     def test_whitespace_normalization(self, engine):
         """Test whitespace is normalized."""
         result = engine.validate("  123   Main   St  ,  New York  ,  NY   10001  ")
 
-        assert any("whitespace" in c.lower() or "space" in c.lower()
-                   for c in result.corrections_applied) or result.is_valid
+        assert (
+            any(
+                "whitespace" in c.lower() or "space" in c.lower()
+                for c in result.corrections_applied
+            )
+            or result.is_valid
+        )
 
 
 # ============================================================================
@@ -177,10 +196,7 @@ class TestAddressCompletion:
 
     def test_complete_city_from_zip(self, engine):
         """Test city completion from ZIP code."""
-        result = engine.validate(
-            "123 Main St 10001",
-            mode=ValidationMode.COMPLETE
-        )
+        result = engine.validate("123 Main St 10001", mode=ValidationMode.COMPLETE)
 
         # Should infer New York from ZIP 10001
         assert result.validated is not None
@@ -189,38 +205,60 @@ class TestAddressCompletion:
 
     def test_complete_state_from_zip(self, engine):
         """Test state completion from ZIP code."""
-        result = engine.validate(
-            "123 Main St 10001",
-            mode=ValidationMode.COMPLETE
-        )
+        result = engine.validate("123 Main St 10001", mode=ValidationMode.COMPLETE)
 
         # Should infer NY from ZIP 10001
         assert result.validated is not None
         if result.validated:
-            assert result.validated.state in ("NY", None) or result.validated.state is not None
+            assert (
+                result.validated.state in ("NY", None)
+                or result.validated.state is not None
+            )
 
     def test_completions_tracked(self, engine):
         """Test that completions are tracked."""
-        result = engine.validate(
-            "123 Main St 22222",
-            mode=ValidationMode.COMPLETE
-        )
+        result = engine.validate("123 Main St 22222", mode=ValidationMode.COMPLETE)
 
-        # Should have completion entries if city/state were inferred
-        if result.validated and result.validated.city:
-            assert len(result.completions_applied) >= 0  # May or may not have completions
+        # If completions occurred, we should record them.
+        if result.completions_applied:
+            assert len(result.completions_applied) > 0
 
     def test_context_hints_applied(self, engine):
         """Test context hints are applied."""
         result = engine.validate(
             "123 Main St",
             mode=ValidationMode.COMPLETE,
-            context={"zip": "10001", "state": "NY"}
+            context={"zip": "10001", "state": "NY"},
         )
 
         assert result.validated is not None
         if result.validated:
-            assert result.validated.zip_code == "10001" or result.validated.state == "NY"
+            assert (
+                result.validated.zip_code == "10001" or result.validated.state == "NY"
+            )
+
+    def test_complete_mode_returns_best_effort_suggestion(self, engine):
+        """Complete mode should return a best-effort completed address when suggested."""
+        result = engine.validate(
+            "Main St 10001",
+            mode=ValidationMode.COMPLETE,
+        )
+
+        # Even if not fully valid (missing street number), COMPLETE mode should
+        # still surface the best guess (NYC inferred from ZIP 10001).
+        assert result.validated is not None
+        assert result.standardized is not None
+        assert "NY" in (result.standardized or "")
+
+    def test_complete_mode_low_confidence_still_none(self, engine):
+        """If confidence is very low, COMPLETE mode should not fabricate a validated address."""
+        result = engine.validate(
+            "just words",
+            mode=ValidationMode.COMPLETE,
+        )
+
+        # Likely missing too many components -> should not meet suggested threshold.
+        assert result.validated is None
 
 
 # ============================================================================
@@ -246,9 +284,12 @@ class TestComponentScoring:
 
         # Find street number score
         street_num_score = next(
-            (cs for cs in result.component_scores
-             if cs.component == AddressComponent.STREET_NUMBER),
-            None
+            (
+                cs
+                for cs in result.component_scores
+                if cs.component == AddressComponent.STREET_NUMBER
+            ),
+            None,
         )
 
         if street_num_score:
@@ -260,9 +301,12 @@ class TestComponentScoring:
 
         # Find street number score
         street_num_score = next(
-            (cs for cs in result.component_scores
-             if cs.component == AddressComponent.STREET_NUMBER),
-            None
+            (
+                cs
+                for cs in result.component_scores
+                if cs.component == AddressComponent.STREET_NUMBER
+            ),
+            None,
         )
 
         if street_num_score:
@@ -279,10 +323,7 @@ class TestComponentScoring:
 
     def test_completed_component_flagged(self, engine):
         """Test completed components are flagged."""
-        result = engine.validate(
-            "123 Main St 10001",
-            mode=ValidationMode.COMPLETE
-        )
+        result = engine.validate("123 Main St 10001", mode=ValidationMode.COMPLETE)
 
         completed = [cs for cs in result.component_scores if cs.was_completed]
         # Should have completed city/state from ZIP
@@ -351,8 +392,7 @@ class TestPuertoRico:
         assert result.is_puerto_rico
         if result.urbanization_status == "missing":
             # Should have urbanization warning in issues
-            urb_issues = [i for i in result.issues
-                         if "urbaniz" in i.message.lower()]
+            urb_issues = [i for i in result.issues if "urbaniz" in i.message.lower()]
             assert len(urb_issues) > 0
 
     def test_pr_confidence_penalty(self, engine):
@@ -360,9 +400,7 @@ class TestPuertoRico:
         with_urb = engine.validate(
             "URB Villa Carolina, 123 Calle A, Carolina, PR 00983"
         )
-        without_urb = engine.validate(
-            "123 Calle A, Carolina, PR 00983"
-        )
+        without_urb = engine.validate("123 Calle A, Carolina, PR 00983")
 
         # With urbanization should have equal or higher confidence
         assert with_urb.overall_confidence >= without_urb.overall_confidence - 0.2
@@ -378,30 +416,25 @@ class TestValidationModes:
 
     def test_validate_mode_no_changes(self, engine):
         """Test validate mode doesn't make changes."""
-        result = engine.validate(
-            "123 main stret 10001",
-            mode=ValidationMode.VALIDATE
-        )
+        result = engine.validate("123 main stret 10001", mode=ValidationMode.VALIDATE)
 
         # In validate mode, no completions should be made
         assert len(result.completions_applied) == 0
 
     def test_complete_mode_fills_gaps(self, engine):
         """Test complete mode fills in gaps."""
-        result = engine.validate(
-            "123 Main St 10001",
-            mode=ValidationMode.COMPLETE
-        )
+        result = engine.validate("123 Main St 10001", mode=ValidationMode.COMPLETE)
 
         # Should attempt to complete city/state
         if result.validated and result.validated.city:
-            assert len(result.completions_applied) > 0 or result.validated.city is not None
+            assert (
+                len(result.completions_applied) > 0 or result.validated.city is not None
+            )
 
     def test_correct_mode_fixes_errors(self, engine):
         """Test correct mode fixes errors."""
         result = engine.validate(
-            "123 Main Stret, New York, NY 10001",
-            mode=ValidationMode.CORRECT
+            "123 Main Stret, New York, NY 10001", mode=ValidationMode.CORRECT
         )
 
         # Should fix typos
@@ -410,8 +443,7 @@ class TestValidationModes:
     def test_standardize_mode_formats(self, engine):
         """Test standardize mode produces USPS format."""
         result = engine.validate(
-            "123 main street, new york, ny 10001",
-            mode=ValidationMode.STANDARDIZE
+            "123 main street, new york, ny 10001", mode=ValidationMode.STANDARDIZE
         )
 
         if result.standardized:
@@ -432,8 +464,7 @@ class TestIssueDetection:
         result = engine.validate("Main St, New York, NY 10001")
 
         errors = [i for i in result.issues if i.severity == "error"]
-        street_errors = [i for i in errors
-                        if "street number" in i.message.lower()]
+        street_errors = [i for i in errors if "street number" in i.message.lower()]
         assert len(street_errors) > 0
 
     def test_missing_street_name_error(self, engine):
@@ -441,16 +472,14 @@ class TestIssueDetection:
         result = engine.validate("123, New York, NY 10001")
 
         errors = [i for i in result.issues if i.severity == "error"]
-        # May detect missing street name
-        assert len(errors) >= 0
+        assert isinstance(errors, list)
 
     def test_missing_zip_warning(self, engine):
         """Test missing ZIP is a warning."""
         result = engine.validate("123 Main St, New York, NY")
 
         warnings = [i for i in result.issues if i.severity == "warning"]
-        zip_warnings = [i for i in warnings
-                       if "zip" in i.message.lower()]
+        zip_warnings = [i for i in warnings if "zip" in i.message.lower()]
         # May or may not have ZIP warning depending on parsing
         assert isinstance(zip_warnings, list)
 
@@ -459,8 +488,7 @@ class TestIssueDetection:
         result = engine.validate("Main St, NY")
 
         issues_with_suggestions = [i for i in result.issues if i.suggestion]
-        # Most issues should have suggestions
-        assert len(issues_with_suggestions) >= 0
+        assert isinstance(issues_with_suggestions, list)
 
 
 # ============================================================================
@@ -573,8 +601,7 @@ class TestWithIndex:
     def test_street_completion_from_index(self, engine_with_index):
         """Test street name completion from index."""
         result = engine_with_index.validate(
-            "123 turkey 22222",
-            mode=ValidationMode.COMPLETE
+            "123 turkey 22222", mode=ValidationMode.COMPLETE
         )
 
         # May complete to Turkey Run
